@@ -46,12 +46,29 @@ Petición HTTP
 - RLS habilitado sin políticas permisivas en `schema.sql`: el navegador nunca
   toca la base directamente, todo pasa por el API (service role key).
 
+### Auditoría (`audit_logs`)
+
+Toda escritura del API deja traza en la bitácora `audit_logs`:
+
+- **Quién**: `auth_user_id` (UUID de Supabase Auth) y `usuario_id` (fila local en
+  `usuarios`); **dónde**: `empresa_id` (tenant activo).
+- **Qué**: `accion` (`CREATE` / `UPDATE` / `DELETE` / `REGISTER` / `LOGIN`), `tabla`
+  y `registro_id`. En `DELETE` se guarda además el contenido previo de la fila
+  (`detalles.antes`); en `REGISTER`/`LOGIN`, el alta de cuenta y el inicio de sesión.
+- **Nunca rompe la operación**: `services/audit.service.ts` es mejor-esfuerzo; si la
+  tabla no existe (esquema sin desplegar) se avisa una sola vez y se deshabilita.
+- **Nunca persiste credenciales**: los campos sensibles (`password`, `api_key`,
+  `app_secret`, `access_token`…) se enmascaran como `••••` antes de guardarlos.
+- **Lectura restringida**: `GET /api/v1/auditoria` (y `GET /:id`) es de solo
+  lectura, acotado a la empresa del token y visible solo para `propietario` y
+  `administrador`, con filtros `?tabla=&accion=&usuario_id=`.
+
 ## Módulos y rutas
 
 | Módulo | Rutas | Contenido |
 |--------|-------|-----------|
 | Auth | `/api/auth` | register (cuenta + empresa + usuario + rol propietario), login, me |
-| Identity | `/api/v1/empresas`, `/usuarios`, `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones` | Tenant, usuarios y RBAC (10 recursos) |
+| Identity | `/api/v1/empresas`, `/usuarios`, `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones`, `/auditoria` | Tenant, usuarios, RBAC y bitácora (10 recursos CRUD + auditoría de solo lectura) |
 | Property | `/api/v1/propiedades`, `/tipos-propiedad` | Catálogo de inmuebles |
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
 | Advertising | `/api/v1/objetivos-publicidad`, `/campanias-publicitarias` | Campañas publicitarias |

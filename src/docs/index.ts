@@ -245,6 +245,29 @@ export const crudModules: CrudDocConfig[] = [
       { name: 'propiedad_id', description: 'Filtra por inmueble consultado', example: 3 },
     ],
   },
+
+  // ── Auditoría ────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/auditoria',
+    tag: 'Auditoría',
+    schema: 'AuditLog',
+    entity: 'Registro de auditoría',
+    plural: 'Registros de auditoría',
+    idExample: 1284,
+    // Solo lectura: la bitácora la escribe el núcleo.
+    disabled: ['create', 'update', 'remove'],
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      { name: 'tabla', description: 'Filtra por tabla afectada', type: 'string', example: 'propiedades' },
+      {
+        name: 'accion',
+        description: 'Filtra por tipo de acción',
+        type: 'string',
+        enum: ['CREATE', 'UPDATE', 'DELETE', 'REGISTER', 'LOGIN'],
+      },
+      { name: 'usuario_id', description: 'Filtra por usuario local', example: 7 },
+    ],
+  },
 ];
 
 /** Componentes OpenAPI (esquemas, parámetros, respuestas y seguridad). */

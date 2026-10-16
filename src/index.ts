@@ -24,6 +24,7 @@ import swaggerUi from 'swagger-ui-express';
 import { config } from './config/global';
 import authRoutes from './routes/auth.route';
 import {
+  auditLogRouter,
   configuracionIntegracionRouter,
   empresaHitoRouter,
   empresaIntegracionRouter,
@@ -83,6 +84,7 @@ app.use('/api/v1/hitos-lanzamiento', hitoLanzamientoRouter);
 app.use('/api/v1/empresas-hitos', empresaHitoRouter);
 app.use('/api/v1/configuraciones-integraciones', configuracionIntegracionRouter);
 app.use('/api/v1/empresas-integraciones', empresaIntegracionRouter);
+app.use('/api/v1/auditoria', auditLogRouter);
 
 // property
 app.use('/api/v1/propiedades', propiedadRouter);

@@ -103,6 +103,9 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
 
     req.organizationId = empresaId;
     req.orgRole = rol;
+    // Fila local en `usuarios`: la usa la bitácora de auditoría para saber
+    // qué usuario de la plataforma realizó la acción.
+    req.localUsuarioId = local.usuario_id;
     next();
   } catch (error) {
     res.status(500).json({ message: error instanceof Error ? error.message : 'Error de contexto de empresa' });

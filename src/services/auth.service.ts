@@ -14,6 +14,7 @@
 import supabase from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { Usuario } from '../models/identity/usuario.model';
+import { logAudit } from './audit.service';
 
 export interface RegisterInput {
   email: string;
@@ -125,6 +126,14 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
     throw new HttpError(500, `No se pudo asignar el rol: ${asignacionError.message}`);
   }
 
+  // Bitácora: alta de cuenta (empresa + usuario + rol propietario).
+  await logAudit('usuarios', 'REGISTER', usuarioId, {
+    email: input.email,
+    empresa_id: empresaId,
+    organizacion: input.organization_name,
+    rol: 'propietario',
+  }, { authUserId: userId, usuarioId, empresaId });
+
   return { user_id: userId, empresa_id: empresaId, usuario_id: usuarioId };
 }
 
@@ -132,8 +141,23 @@ export async function login(email: string, password: string): Promise<SessionRes
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error || !data.session) {
+    // Los intentos fallidos NO se registran en la bitácora: el email podría
+    // no pertenecer a nadie y no debe quedar asociado a una cuenta.
     throw new HttpError(401, 'Credenciales inválidas');
   }
+
+  // Bitácora: inicio de sesión (empresa resuelta por email en `usuarios`).
+  const { data: local } = await supabase
+    .from('usuarios')
+    .select('usuario_id, empresa_id')
+    .eq('email', email)
+    .maybeSingle();
+
+  await logAudit('sesion', 'LOGIN', (local as Usuario | null)?.usuario_id ?? null, { email }, {
+    authUserId: data.user.id,
+    usuarioId: (local as Usuario | null)?.usuario_id,
+    empresaId: (local as Usuario | null)?.empresa_id ?? null,
+  });
 
   return {
     access_token: data.session.access_token,

@@ -7,6 +7,7 @@
 //   export const categoriaService = new BaseService<Categoria>('categorias', 'categoria_id');
 
 import supabase from '../config/supabaseClient';
+import { AuditContext, logAudit } from '../services/audit.service';
 import { NotFoundError } from './errors';
 
 export interface GetAllOptions {
@@ -47,18 +48,86 @@ export class BaseService<T = any> {
     return relations.length ? [...columns, ...relations].join(',') : columns.join(',');
   }
 
-  /** Registra una acción en la tabla de auditoría `audit_logs`. */
-  async logAudit(action: string, userId: string, details: unknown): Promise<void> {
-    const { error } = await supabase.from('audit_logs').insert([
-      {
-        action,
-        table_name: this.table,
-        user_id: userId,
-        details,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-    if (error) console.error('Error al registrar auditoría:', error.message);
+  /**
+   * Registra la acción en la bitácora `audit_logs` (mejor-esfuerzo: la
+   * auditoría jamás rompe la operación de negocio). El contexto lo aporta el
+   * controlador desde la sesión (`req.userId`, `req.localUsuarioId`,
+   * `req.organizationId`).
+   */
+  protected async auditar(
+    accion: 'CREATE' | 'UPDATE' | 'DELETE',
+    registroId: string | number | null | undefined,
+    detalles: unknown,
+    audit?: AuditContext
+  ): Promise<void> {
+    // Sin sesión no hay autor registrable: se omite el registro.
+    if (!audit?.authUserId) return;
+    await logAudit(this.table, accion, registroId, detalles, audit);
+  }
+
+  /** Crea un registro a partir de un payload validado (Request). */
+  async create<U = T>(payload: Partial<U>, audit?: AuditContext): Promise<U> {
+    const { data, error } = await supabase
+      .from(this.table)
+      .insert([payload])
+      .select(this.selectStatement(['*']))
+      .single();
+    if (error) throw new Error(`Error al crear registro en '${this.table}': ${error.message}`);
+    const creado = data as unknown as Record<string, unknown> | null;
+    const idCreado = creado?.[this.primaryKey];
+    await this.auditar(
+      'CREATE',
+      typeof idCreado === 'string' || typeof idCreado === 'number' ? idCreado : null,
+      { despues: payload },
+      audit
+    );
+    return data as U;
+  }
+
+  /** Actualiza un registro por su llave primaria con un payload validado (Request). */
+  async update<U = T>(id: string | number, payload: Partial<U>, audit?: AuditContext): Promise<U> {
+    const { data, error } = await supabase
+      .from(this.table)
+      .update(payload as never)
+      .eq(this.primaryKey, id)
+      .select(this.selectStatement(['*']))
+      .maybeSingle();
+
+    if (error) throw new Error(`Error al actualizar registro en '${this.table}': ${error.message}`);
+    if (!data) throw new NotFoundError(`Registro de '${this.table}' con id ${id}`);
+    await this.auditar('UPDATE', id, { cambios: payload }, audit);
+    return data as U;
+  }
+
+  /** Elimina un registro por su llave primaria. */
+  async remove(id: string | number, audit?: AuditContext): Promise<void> {
+    // Se lee la fila ANTES de borrarla para dejar constancia en la bitácora
+    // de qué se borró exactamente.
+    let antes: unknown = null;
+    if (audit?.authUserId) {
+      try {
+        antes = await supabase
+          .from(this.table)
+          .select('*')
+          .eq(this.primaryKey, id)
+          .maybeSingle()
+          .then(({ data }) => data);
+      } catch {
+        antes = null;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from(this.table)
+      .delete()
+      .eq(this.primaryKey, id)
+      .select(this.primaryKey);
+
+    if (error) throw new Error(`Error al eliminar registro de '${this.table}': ${error.message}`);
+    if (!data || data.length === 0) {
+      throw new NotFoundError(`Registro de '${this.table}' con id ${id}`);
+    }
+    await this.auditar('DELETE', id, { antes }, audit);
   }
 
   /** Cuenta registros que cumplan condiciones exactas. */
@@ -122,47 +191,5 @@ export class BaseService<T = any> {
       throw new Error(`No se pudo encontrar el registro en la tabla ${this.table}.`);
     }
     return (data as U) ?? null;
-  }
-
-  /** Crea un registro a partir de un payload validado (Request). */
-  async create<U = T>(payload: Partial<U>, userId?: string): Promise<U> {
-    const { data, error } = await supabase
-      .from(this.table)
-      .insert([payload])
-      .select(this.selectStatement(['*']))
-      .single();
-    if (error) throw new Error(`Error al crear registro en '${this.table}': ${error.message}`);
-    if (userId) await this.logAudit('CREATE', userId, { entity: payload });
-    return data as U;
-  }
-
-  /** Actualiza un registro por su llave primaria con un payload validado (Request). */
-  async update<U = T>(id: string | number, payload: Partial<U>, userId?: string): Promise<U> {
-    const { data, error } = await supabase
-      .from(this.table)
-      .update(payload as never)
-      .eq(this.primaryKey, id)
-      .select(this.selectStatement(['*']))
-      .maybeSingle();
-
-    if (error) throw new Error(`Error al actualizar registro en '${this.table}': ${error.message}`);
-    if (!data) throw new NotFoundError(`Registro de '${this.table}' con id ${id}`);
-    if (userId) await this.logAudit('UPDATE', userId, { id, entity: payload });
-    return data as U;
-  }
-
-  /** Elimina un registro por su llave primaria. */
-  async remove(id: string | number, userId?: string): Promise<void> {
-    const { data, error } = await supabase
-      .from(this.table)
-      .delete()
-      .eq(this.primaryKey, id)
-      .select(this.primaryKey);
-
-    if (error) throw new Error(`Error al eliminar registro de '${this.table}': ${error.message}`);
-    if (!data || data.length === 0) {
-      throw new NotFoundError(`Registro de '${this.table}' con id ${id}`);
-    }
-    if (userId) await this.logAudit('DELETE', userId, { id });
   }
 }

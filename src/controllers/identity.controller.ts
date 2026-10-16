@@ -21,6 +21,7 @@ import {
   usuarioRolRequest,
 } from '../requests/identity.request';
 import {
+  auditLogResource,
   configuracionIntegracionResource,
   empresaHitoResource,
   empresaIntegracionResource,
@@ -147,4 +148,19 @@ export const { router: empresaIntegracionRouter } = createCrudRouter({
   resource: empresaIntegracionResource,
   entityName: 'Integración de la empresa',
   ...SEGMENTO,
+});
+
+// ── Auditoría (SOLO LECTURA) ────────────────────────────────────────────────
+// La escribe el núcleo (`services/audit.service.ts`) en cada escritura y en
+// el registro/inicio de sesión. Aquí solo se consulta, siempre dentro de la
+// empresa activa y solo para propietario y administrador.
+export const { router: auditLogRouter } = createCrudRouter({
+  table: 'audit_logs',
+  primaryKey: 'audit_log_id',
+  joins: ['usuarios(*, empresas(*))', 'empresas(*)'],
+  resource: auditLogResource,
+  entityName: 'Registro de auditoría',
+  middlewares: [...requireOrg, filterByEmpresa, writeByOwnerOrAdmin],
+  disabled: ['create', 'update', 'remove'],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 });

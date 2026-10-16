@@ -35,6 +35,11 @@ export interface CrudDocConfig {
   female?: boolean;
   /** Plural del nombre (por defecto, `${entity}s`). */
   plural?: string;
+  /**
+   * Operaciones que el router NO expone (mismos valores que `CrudRouterConfig.disabled`).
+   * P. ej. la auditoría es de solo lectura: `['create', 'update', 'remove']`.
+   */
+  disabled?: Array<'create' | 'update' | 'remove'>;
 }
 
 const schemaRef = (schema: string): Record<string, unknown> => ({ $ref: `#/components/schemas/${schema}` });
@@ -86,99 +91,115 @@ export function crudPaths(config: CrudDocConfig): Record<string, any> {
     content: json(schemaRef(`${schema}Input`), openapiSchemas[`${schema}Input`]?.example),
   };
 
+  const off = new Set(config.disabled ?? []);
+  const descripcionEscritura =
+    'Valida el payload con Joi y crea el registro. Los campos no declarados se descartan ' +
+    '(`stripUnknown`) y los campos obligatorios se listan en el esquema de entrada.';
+
+  const collection: Record<string, any> = {
+    get: {
+      tags: [tag],
+      summary: `Lista ${art.los} ${plural}`,
+      description:
+        `Devuelve ${art.los} ${plural} en orden de creación (más recientes primero). ` +
+        'Se filtra por cualquier columna exacta del recurso (p. ej. `?empresa_id=1&estado=activo`), ' +
+        'además de los filtros propios del módulo y la paginación `?limite=&pagina=`.',
+      parameters: listParameters,
+      responses: {
+        200: {
+          description: `Lista de ${plural}`,
+          content: json({ type: 'array', items: schemaRef(schema) }, itemExample === undefined ? undefined : [itemExample]),
+        },
+        401: responseRef('Unauthorized'),
+        403: responseRef('Forbidden'),
+        500: responseRef('ServerError'),
+      },
+    },
+  };
+
+  if (!off.has('create')) {
+    collection.post = {
+      tags: [tag],
+      summary: `Crea ${art.un} ${nombre}`,
+      description: descripcionEscritura,
+      requestBody: bodyWithExample,
+      responses: {
+        201: { description: `${entity} ${fem('creada', 'creado')}`, content: json(schemaRef(schema), itemExample) },
+        400: responseRef('BadRequest'),
+        401: responseRef('Unauthorized'),
+        403: responseRef('Forbidden'),
+        500: responseRef('ServerError'),
+      },
+    };
+  }
+
+  const item: Record<string, any> = {
+    parameters: idParameters,
+    get: {
+      tags: [tag],
+      summary: `Obtiene ${art.un} ${nombre} por id`,
+      responses: {
+        200: { description: `${entity} ${fem('encontrada', 'encontrado')}`, content: json(schemaRef(schema), itemExample) },
+        401: responseRef('Unauthorized'),
+        404: responseRef('NotFound'),
+        500: responseRef('ServerError'),
+      },
+    },
+  };
+
+  if (!off.has('update')) {
+    item.put = {
+      tags: [tag],
+      summary: `Actualiza ${art.un} ${nombre}`,
+      description:
+        'Actualización completa: se envían los campos a modificar. Todos son opcionales, ' +
+        'pero los campos enviados deben ser válidos. `PATCH` es un alias registrado en la misma ruta.',
+      requestBody: bodyWithExample,
+      responses: {
+        200: { description: `${entity} ${fem('actualizada', 'actualizado')}`, content: json(schemaRef(schema), itemExample) },
+        400: responseRef('BadRequest'),
+        401: responseRef('Unauthorized'),
+        403: responseRef('Forbidden'),
+        404: responseRef('NotFound'),
+        500: responseRef('ServerError'),
+      },
+    };
+    item.patch = {
+      tags: [tag],
+      summary: `Actualiza ${art.un} ${nombre} (alias PATCH)`,
+      description: 'Mismo comportamiento que `PUT /{id}`: los campos no enviados conservan su valor.',
+      requestBody: bodyWithExample,
+      responses: {
+        200: { description: `${entity} ${fem('actualizada', 'actualizado')}`, content: json(schemaRef(schema), itemExample) },
+        400: responseRef('BadRequest'),
+        401: responseRef('Unauthorized'),
+        403: responseRef('Forbidden'),
+        404: responseRef('NotFound'),
+        500: responseRef('ServerError'),
+      },
+    };
+  }
+
+  if (!off.has('remove')) {
+    item.delete = {
+      tags: [tag],
+      summary: `Elimina ${art.un} ${nombre}`,
+      description: 'Elimina el registro y deja traza en la bitácora de auditoría (`audit_logs`).',
+      responses: {
+        200: {
+          description: 'Registro eliminado',
+          content: json(schemaRef('Mensaje'), { message: `${entity} ${fem('eliminada', 'eliminado')} correctamente` }),
+        },
+        401: responseRef('Unauthorized'),
+        403: responseRef('Forbidden'),
+        404: responseRef('NotFound'),
+        500: responseRef('ServerError'),
+      },
+    };
+  }
+
   return {
-    [path]: {
-      get: {
-        tags: [tag],
-        summary: `Lista ${art.los} ${plural}`,
-        description:
-          `Devuelve ${art.los} ${plural} en orden de creación (más recientes primero). ` +
-          'Se filtra por cualquier columna exacta del recurso (p. ej. `?empresa_id=1&estado=activo`), ' +
-          'además de los filtros propios del módulo y la paginación `?limite=&pagina=`.',
-        parameters: listParameters,
-        responses: {
-          200: {
-            description: `Lista de ${plural}`,
-            content: json({ type: 'array', items: schemaRef(schema) }, itemExample === undefined ? undefined : [itemExample]),
-          },
-          401: responseRef('Unauthorized'),
-          403: responseRef('Forbidden'),
-          500: responseRef('ServerError'),
-        },
-      },
-      post: {
-        tags: [tag],
-        summary: `Crea ${art.un} ${nombre}`,
-        description:
-          'Valida el payload con Joi y crea el registro. Los campos no declarados se descartan ' +
-          '(`stripUnknown`) y los campos obligatorios se listan en el esquema de entrada.',
-        requestBody: bodyWithExample,
-        responses: {
-          201: { description: `${entity} ${fem('creada', 'creado')}`, content: json(schemaRef(schema), itemExample) },
-          400: responseRef('BadRequest'),
-          401: responseRef('Unauthorized'),
-          403: responseRef('Forbidden'),
-          500: responseRef('ServerError'),
-        },
-      },
-    },
-    [`${path}/{id}`]: {
-      parameters: idParameters,
-      get: {
-        tags: [tag],
-        summary: `Obtiene ${art.un} ${nombre} por id`,
-        responses: {
-          200: { description: `${entity} ${fem('encontrada', 'encontrado')}`, content: json(schemaRef(schema), itemExample) },
-          401: responseRef('Unauthorized'),
-          404: responseRef('NotFound'),
-          500: responseRef('ServerError'),
-        },
-      },
-      put: {
-        tags: [tag],
-        summary: `Actualiza ${art.un} ${nombre}`,
-        description:
-          'Actualización completa: se envían los campos a modificar. Todos son opcionales, ' +
-          'pero los campos enviados deben ser válidos. `PATCH` es un alias registrado en la misma ruta.',
-        requestBody: bodyWithExample,
-        responses: {
-          200: { description: `${entity} ${fem('actualizada', 'actualizado')}`, content: json(schemaRef(schema), itemExample) },
-          400: responseRef('BadRequest'),
-          401: responseRef('Unauthorized'),
-          403: responseRef('Forbidden'),
-          404: responseRef('NotFound'),
-          500: responseRef('ServerError'),
-        },
-      },
-      patch: {
-        tags: [tag],
-        summary: `Actualiza ${art.un} ${nombre} (alias PATCH)`,
-        description: 'Mismo comportamiento que `PUT /{id}`: los campos no enviados conservan su valor.',
-        requestBody: bodyWithExample,
-        responses: {
-          200: { description: `${entity} ${fem('actualizada', 'actualizado')}`, content: json(schemaRef(schema), itemExample) },
-          400: responseRef('BadRequest'),
-          401: responseRef('Unauthorized'),
-          403: responseRef('Forbidden'),
-          404: responseRef('NotFound'),
-          500: responseRef('ServerError'),
-        },
-      },
-      delete: {
-        tags: [tag],
-        summary: `Elimina ${art.un} ${nombre}`,
-        description: 'Elimina el registro y deja traza en la auditoría del núcleo (`logAudit`).',
-        responses: {
-          200: {
-            description: 'Registro eliminado',
-            content: json(schemaRef('Mensaje'), { message: `${entity} ${fem('eliminada', 'eliminado')} correctamente` }),
-          },
-          401: responseRef('Unauthorized'),
-          403: responseRef('Forbidden'),
-          404: responseRef('NotFound'),
-          500: responseRef('ServerError'),
-        },
-      },
-    },
+    [path]: collection,
+    [`${path}/{id}`]: item,
   };
 }

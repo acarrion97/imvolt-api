@@ -30,6 +30,12 @@ interface EntityDef {
    * del esquema referenciado en la segunda pasada de `buildEntitySchemas`.
    */
   relations?: Record<string, string>;
+  /**
+   * Entidad de SOLO LECTURA (p. ej. la bitácora `audit_logs`, que escribe el
+   * núcleo y no expone POST/PUT/DELETE): no se genera el esquema `XxxInput`,
+   * porque ningún endpoint acepta ese payload.
+   */
+  soloLectura?: boolean;
 }
 
 const id = (description = 'Identificador único del registro'): Prop => ({
@@ -324,11 +330,35 @@ const definitions: EntityDef[] = [
     example: { contacto_id: 42, nombres: 'María Fernanda', apellidos: 'Rivas Ochoa', correo: 'maria.rivas@correo.com', telefono: '+593991234567', origen: 'meta_formulario', propiedad_id: 3, estado: 'activo', creado_en: '2026-03-06T11:02:00.000Z', actualizado_en: '2026-03-06T11:02:00.000Z' },
     relations: { propiedad: 'Propiedad' },
   },
+
+  // ── Auditoría ────────────────────────────────────────────────────────────
+  {
+    // Bitácora de solo lectura: la escribe el núcleo en cada escritura y en el
+    // registro/inicio de sesión. No tiene `Input` usable (sin operaciones de
+    // escritura en el router), pero se documenta el esquema de respuesta.
+    name: 'AuditLog',
+    pk: 'audit_log_id',
+    pkExample: 1284,
+    properties: {
+      accion: { type: 'string', enum: ['CREATE', 'UPDATE', 'DELETE', 'REGISTER', 'LOGIN'], example: 'UPDATE', description: 'Acción registrada' },
+      tabla: { type: 'string', maxLength: 60, example: 'propiedades', description: 'Tabla afectada (o `sesion` para inicios de sesión)' },
+      registro_id: { type: 'string', maxLength: 50, nullable: true, example: '3', description: 'Id del registro afectado' },
+      auth_user_id: { type: 'string', maxLength: 36, nullable: true, example: '9f2c1a7e-4b3d-4e5f-8a9b-0c1d2e3f4a5b', description: 'UUID del usuario en Supabase Auth' },
+      usuario_id: { type: 'integer', nullable: true, description: 'FK → Usuario (fila local; null si el usuario fue borrado)', example: 7 },
+      empresa_id: { type: 'integer', nullable: true, description: 'FK → Empresa (tenant de la acción)', example: 1 },
+      detalles: { type: 'object', nullable: true, example: { cambios: { precio: 19500 } }, description: 'Payload involucrado, con credenciales ya enmascaradas (`••••`)' },
+    },
+    required: ['accion', 'tabla'],
+    example: { audit_log_id: 1284, accion: 'UPDATE', tabla: 'propiedades', registro_id: '3', auth_user_id: '9f2c1a7e-4b3d-4e5f-8a9b-0c1d2e3f4a5b', usuario_id: 7, empresa_id: 1, detalles: { cambios: { precio: 19500 } }, estado: 'activo', creado_en: '2026-03-06T12:04:31.000Z', actualizado_en: '2026-03-06T12:04:31.000Z' },
+    relations: { usuario: 'Usuario', empresa: 'Empresa' },
+    // Solo lectura: la bitácora la escribe el núcleo; no existe payload de entrada.
+    soloLectura: true,
+  },
 ];
 
 /** Construye el par de esquemas (completo + input) de una entidad. */
 function buildEntitySchemas(def: EntityDef): Prop {
-  const { name, pk, pkExample, properties, required, example, relations } = def;
+  const { name, pk, pkExample, properties, required, example, relations, soloLectura } = def;
 
   const { [pk]: _pk, estado: _estado, creado_en: _creado, actualizado_en: _actualizado, ...inputExample } = example;
 
@@ -345,22 +375,27 @@ function buildEntitySchemas(def: EntityDef): Prop {
     ])
   );
 
-  return {
-    [name]: {
-      type: 'object',
-      title: name,
-      description: `Registro completo de ${name}`,
-      properties: {
-        [pk]: { ...id(`Identificador único de ${name}`), example: pkExample },
-        ...properties,
-        ...relationProps,
-        estado: estadoField,
-        creado_en: ts('Fecha de creación'),
-        actualizado_en: ts('Última modificación'),
-      },
-      required: [pk, ...required],
-      example,
+  const completo: Prop = {
+    type: 'object',
+    title: name,
+    description: `Registro completo de ${name}`,
+    properties: {
+      [pk]: { ...id(`Identificador único de ${name}`), example: pkExample },
+      ...properties,
+      ...relationProps,
+      estado: estadoField,
+      creado_en: ts('Fecha de creación'),
+      actualizado_en: ts('Última modificación'),
     },
+    required: [pk, ...required],
+    example,
+  };
+
+  // Entidades de solo lectura (p. ej. la bitácora) no tienen payload escribible.
+  if (soloLectura) return { [name]: completo };
+
+  return {
+    [name]: completo,
     [`${name}Input`]: {
       type: 'object',
       title: `${name}Input`,

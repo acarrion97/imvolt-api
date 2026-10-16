@@ -12,6 +12,8 @@
 --     src/models/*.model.ts, su Request/Resource y su documentación OpenAPI.
 --   • `integraciones` es una tabla de apoyo del diagrama (catálogo de
 --     proveedores disponibles) y NO tiene CRUD: se alimenta con esta semilla.
+--   • `audit_logs` es la bitácora de escrituras: solo lectura desde el API
+--     (GET /api/v1/auditoria, restringido a propietario y administrador).
 --   • La autenticación vive en Supabase Auth; el usuario local, su empresa y
 --     sus roles se resuelven en usuarios + roles_usuarios + roles.
 --
@@ -255,6 +257,28 @@ create table if not exists public.contactos (
     actualizado_en timestamptz not null default now()
 );
 
+-- ── AUDITORÍA ───────────────────────────────────────────────────────────────
+-- Trazas de las escrituras del API (CREATE / UPDATE / DELETE y eventos de
+-- cuenta). Es una bitácora de SÓLO LECTURA desde el API: no tiene CRUD de
+-- escritura y sobrevive al borrado de usuarios/empresas (FK on delete set null).
+
+create table if not exists public.audit_logs (
+    audit_log_id  bigserial primary key,
+    accion        varchar(10) not null,
+    tabla         varchar(60) not null,
+    -- Id del registro afectado (texto por flexibilidad entre tablas).
+    registro_id   varchar(50),
+    -- Usuario de Supabase Auth (UUID); puede no existir en `usuarios`.
+    auth_user_id  varchar(36),
+    -- Fila local del usuario en `usuarios`; set null si se borra el usuario.
+    usuario_id    bigint references public.usuarios (usuario_id) on delete set null,
+    -- Tenant al que pertenece la acción (set null si se borra la empresa).
+    empresa_id    bigint references public.empresas (empresa_id) on delete set null,
+    -- Payload involucrado, con credenciales enmascaradas por el API.
+    detalles      jsonb,
+    creado_en     timestamptz not null default now()
+);
+
 -- ── ÍNDICES (filtros frecuentes de los CRUD) ─────────────────────────────────
 
 create index if not exists idx_usuarios_empresa        on public.usuarios (empresa_id);
@@ -274,6 +298,10 @@ create index if not exists idx_campanias_propiedad     on public.campanias_publi
 create index if not exists idx_campanias_objetivo      on public.campanias_publicitarias (objetivo_publicidad_id);
 create index if not exists idx_contactos_propiedad     on public.contactos (propiedad_id);
 create index if not exists idx_contactos_origen        on public.contactos (origen);
+create index if not exists idx_audit_empresa           on public.audit_logs (empresa_id);
+create index if not exists idx_audit_usuario           on public.audit_logs (usuario_id);
+create index if not exists idx_audit_tabla             on public.audit_logs (tabla, accion);
+create index if not exists idx_audit_creado            on public.audit_logs (creado_en desc);
 
 -- ── RLS: denegado por defecto ────────────────────────────────────────────────
 -- El API accede con la service role key (bypass de RLS) y aplica autenticación,
@@ -289,7 +317,7 @@ begin
         'configuraciones_integraciones', 'integraciones', 'empresas_integraciones',
         'tipos_propiedades', 'propiedades', 'tipos_plantillas', 'plantillas',
         'formatos', 'enfoques_comerciales', 'contenidos_ia',
-        'objetivo_publicidad', 'campanias_publicitarias', 'contactos'
+        'objetivo_publicidad', 'campanias_publicitarias', 'contactos', 'audit_logs'
     ]
     loop
         execute format('alter table public.%I enable row level security', tabla);

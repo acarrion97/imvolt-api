@@ -8,10 +8,18 @@
 // Maneja los códigos HTTP: 400 (validación), 404 (no encontrado), 500 (error).
 
 import { Request, Response } from 'express';
+import { AuditContext } from '../services/audit.service';
 import { BaseRequest } from './base.request';
 import { BaseResource } from './base.resource';
 import { BaseService } from './base.service';
 import { HttpError } from './errors';
+
+/** Contexto de auditoría extraído de la sesión (autor + tenant de la acción). */
+const auditContext = (req: Request): AuditContext => ({
+  authUserId: req.userId,
+  usuarioId: req.localUsuarioId,
+  empresaId: req.organizationId ?? null,
+});
 
 export interface BaseControllerConfig<T> {
   service: BaseService<T>;
@@ -60,7 +68,7 @@ export class BaseController<T = any> {
   create = async (req: Request, res: Response): Promise<void> => {
     try {
       const payload = this.request ? this.request.validateCreate(req.body) : req.body;
-      const row = await this.service.create(payload, req.userId);
+      const row = await this.service.create(payload, auditContext(req));
       res.status(201).json(this.format(row));
     } catch (error) {
       this.sendError(res, error);
@@ -71,7 +79,7 @@ export class BaseController<T = any> {
   update = async (req: Request, res: Response): Promise<void> => {
     try {
       const payload = this.request ? this.request.validateUpdate(req.body) : req.body;
-      const row = await this.service.update(req.params.id, payload, req.userId);
+      const row = await this.service.update(req.params.id, payload, auditContext(req));
       res.json(this.format(row));
     } catch (error) {
       this.sendError(res, error);
@@ -81,7 +89,7 @@ export class BaseController<T = any> {
   /** DELETE /:id */
   remove = async (req: Request, res: Response): Promise<void> => {
     try {
-      await this.service.remove(req.params.id, req.userId);
+      await this.service.remove(req.params.id, auditContext(req));
       res.json({ message: `${this.entityName} eliminado correctamente` });
     } catch (error) {
       this.sendError(res, error);

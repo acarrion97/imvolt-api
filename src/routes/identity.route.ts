@@ -6,6 +6,7 @@
 // la spec y los modelos nunca se desalinean.
 
 export {
+  auditLogRouter,
   configuracionIntegracionRouter,
   empresaHitoRouter,
   empresaIntegracionRouter,

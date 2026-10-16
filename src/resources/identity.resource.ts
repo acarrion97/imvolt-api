@@ -6,6 +6,7 @@
 // p. ej. `empresas` → `empresa`. Si la relación no se pudo resolver, va null.
 
 import { BaseResource } from '../core/base.resource';
+import { AuditLogView } from '../models/identity/audit_log.model';
 import { ConfiguracionIntegracionView } from '../models/identity/configuracion_integracion.model';
 import { Empresa } from '../models/identity/empresa.model';
 import { EmpresaHitoView } from '../models/identity/empresa_hito.model';
@@ -144,4 +145,21 @@ export const integracionResource = new BaseResource<any, Integracion>((row) => (
   estado: row.estado,
   creado_en: row.creado_en,
   actualizado_en: row.actualizado_en,
+}));
+
+/** Vista de la bitácora de auditoría (solo lectura; la escribe el núcleo). */
+export const auditLogResource = new BaseResource<any, AuditLogView>((row) => ({
+  audit_log_id: row.audit_log_id,
+  accion: row.accion,
+  tabla: row.tabla,
+  registro_id: row.registro_id ?? null,
+  auth_user_id: row.auth_user_id ?? null,
+  usuario_id: row.usuario_id ?? null,
+  empresa_id: row.empresa_id ?? null,
+  detalles: row.detalles ?? null,
+  creado_en: row.creado_en,
+  estado: row.estado,
+  actualizado_en: row.actualizado_en,
+  usuario: row.usuarios ? usuarioResource.format(row.usuarios) : null,
+  empresa: row.empresas ? empresaResource.format(row.empresas) : null,
 }));

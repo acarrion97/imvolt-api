@@ -14,6 +14,7 @@ export const openapiTags = [
   { name: 'Creative', description: 'Plantillas, formatos, enfoques comerciales y contenidos generados con IA (RF-04 / RF-05)' },
   { name: 'Publicidad', description: 'Objetivos y campañas publicitarias de IMVOLT Ads (RF-07 / RF-08)' },
   { name: 'Leads', description: 'Contactos captados por campañas, formularios o registro manual (RF-10)' },
+  { name: 'Auditoría', description: 'Bitácora de solo lectura: quién hizo qué, sobre qué tabla y dentro de qué empresa (RF-09)' },
 ];
 
 export const securitySchemes = {

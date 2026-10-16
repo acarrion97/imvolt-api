@@ -9,6 +9,8 @@ declare global {
       userId?: string;
       /** Datos del usuario autenticado. */
       user?: Record<string, unknown>;
+      /** Fila local del usuario en `usuarios` (resuelta por `orgContext`). */
+      localUsuarioId?: number;
       /** Organización activa del contexto (multi-tenant). */
       organizationId?: string;
       /** Rol del usuario dentro de la organización activa. */
