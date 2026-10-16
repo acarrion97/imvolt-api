@@ -8,7 +8,7 @@
 // deriva de datos confirmados de la ficha; lo no verificado se omite o se
 // marca como "requiere confirmación".
 
-import { Propiedad } from '../models/catalog.model';
+import { Propiedad } from '../models/property/propiedad.model';
 
 export interface EstrategaInput {
   propiedad: Propiedad;
@@ -43,14 +43,8 @@ const FORMATOS_POR_MEDIO: Record<string, string[]> = {
 
 /** Arma la estrategia solo con datos presentes en la ficha. */
 export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput {
-  const ubicacion = [propiedad.ciudad, propiedad.pais].filter(Boolean).join(', ');
-  const superficie = propiedad.superficie_m2 ? `${propiedad.superficie_m2} m²` : null;
-  const atributos = [
-    propiedad.habitaciones ? `${propiedad.habitaciones} habitaciones` : null,
-    propiedad.banos ? `${propiedad.banos} baños` : null,
-    propiedad.estacionamientos ? `${propiedad.estacionamientos} estacionamientos` : null,
-    superficie,
-  ].filter((value): value is string => Boolean(value));
+  const ubicacion = propiedad.ubicacion?.trim() ?? '';
+  const descripcion = propiedad.descripcion?.trim() ?? '';
 
   const angulos: AnguloCreativo[] = [];
 
@@ -64,7 +58,7 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
   }
 
   if (propiedad.precio) {
-    const precio = `${propiedad.moneda} ${propiedad.precio.toLocaleString('es-EC')}`;
+    const precio = propiedad.precio.toLocaleString('es-EC');
     angulos.push({
       id: 'precio',
       nombre: 'Valor de referencia',
@@ -73,12 +67,21 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
     });
   }
 
-  if (atributos.length > 0) {
+  if (descripcion) {
     angulos.push({
-      id: 'estilo_vida',
-      nombre: 'Atributos del inmueble',
-      enfoque: 'Destacar características confirmadas de la ficha como motivo de visita.',
-      copy_sugerido: `${propiedad.nombre}: ${atributos.join(' · ')}. Agenda una visita con nuestro equipo.`,
+      id: 'descripcion',
+      nombre: 'Descripción verificada',
+      enfoque: 'Reutilizar textualmente la descripción de la ficha, sin añadir atributos que no estén en ella.',
+      copy_sugerido: `${propiedad.nombre}: ${descripcion}`,
+    });
+  }
+
+  if (propiedad.disponibilidad === 'disponible') {
+    angulos.push({
+      id: 'disponibilidad',
+      nombre: 'Disponibilidad confirmada',
+      enfoque: 'Invitar a la visita apoyándose en la disponibilidad vigente de la ficha.',
+      copy_sugerido: `${propiedad.nombre}: disponible ahora. Agenda una visita con nuestro asesor.`,
     });
   }
 
@@ -92,13 +95,16 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
   }
 
   const advertencias: string[] = [];
-  if (propiedad.tiene_render_conceptual) {
+  if (descripcion.toLowerCase().includes('render')) {
     advertencias.push(
-      'La propiedad contiene renders o escenas conceptuales: identifícalos como tales en la publicidad (§07, fidelidad).',
+      'La ficha menciona renders o escenas conceptuales: identifícalos como tales en la publicidad (§07, fidelidad).',
     );
   }
   if (!propiedad.precio) {
     advertencias.push('La ficha no tiene precio confirmado: no publiques valores; usa "consulta disponibilidad y condiciones".');
+  }
+  if (propiedad.disponibilidad !== 'disponible') {
+    advertencias.push(`La disponibilidad de la ficha es "${propiedad.disponibilidad}": no la presentes como disponible.`);
   }
   advertencias.push('El anunciante debe verificar precio, disponibilidad y condiciones antes de cada publicación.');
 
@@ -110,7 +116,7 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
     copy_corto: angulos[0].copy_sugerido,
     copy_largo: [
       angulos[0].copy_sugerido,
-      atributos.length ? `Características confirmadas: ${atributos.join(', ')}.` : null,
+      descripcion ? `Descripción confirmada: ${descripcion}` : null,
       'Solicita información con un asesor para conocer disponibilidad y condiciones de compra.',
     ]
       .filter(Boolean)
@@ -118,7 +124,7 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
     cta: 'Solicita información',
     guion_audiovisual: [
       `Plano general de ${propiedad.nombre}${ubicacion ? ` en ${ubicacion}` : ''}, sin modificar geometría ni entorno.`,
-      atributos.length ? `Recorrido por los atributos confirmados: ${atributos.join(', ')}.` : 'Recorrido por los espacios visibles de la propiedad.',
+      descripcion ? `Recorrido alineado con la descripción de la ficha: ${descripcion}` : 'Recorrido por los espacios visibles de la propiedad.',
       'Cierre con llamado a la acción: solicita información con un asesor.',
       'No añadir textos superpuestos ni escenas no presentes en la fotografía de referencia.',
     ].join(' '),

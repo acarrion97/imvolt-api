@@ -32,6 +32,13 @@ export interface CrudRouterConfig<T> {
   table: string;
   /** Llave primaria (por defecto 'id'). */
   primaryKey?: string;
+  /**
+   * Relaciones (llaves foráneas) a incrustar en las respuestas, en sintaxis
+   * PostgREST: p. ej. `['empresas(*)', 'tipos_propiedades(*)']`. El objeto
+   * incrustado llega con el nombre de la TABLA foránea y el Resource lo
+   * renombra a singular (p. ej. `empresas` → `empresa`).
+   */
+  joins?: string[];
 
   /** Request con validaciones + payload (opcional; sin él se usa req.body crudo). */
   request?: BaseRequest<T>;
@@ -78,7 +85,7 @@ export interface CrudRouterResult<T> {
 
 export function createCrudRouter<T = any>(config: CrudRouterConfig<T>): CrudRouterResult<T> {
   const service =
-    config.service ?? new BaseService<T>(config.table, config.primaryKey ?? 'id');
+    config.service ?? new BaseService<T>(config.table, config.primaryKey ?? 'id', config.joins ?? []);
 
   const controller =
     config.controller ??

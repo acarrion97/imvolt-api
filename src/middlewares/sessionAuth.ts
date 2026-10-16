@@ -1,13 +1,28 @@
 // middlewares/sessionAuth.ts
-// Valida el token Bearer de Supabase Auth y resuelve el contexto de
-// organización (multi-tenant) del documento maestro, §15.
+// Valida el token Bearer de Supabase Auth y resuelve el contexto de EMPRESA
+// (multi-tenant) sobre el diagrama relacional.
 //
 //   Authorization: Bearer <access_token>
-//   X-Org-Id: <organization_id>   (opcional; si falta se usa la primera membresía)
+//   X-Empresa-Id: <empresa_id>   (opcional; si falta se usa la del usuario)
+//
+// `sessionAuth` comprueba el token con Supabase Auth. `orgContext` traduce ese
+// usuario a la fila local `usuarios` (por email) y resuelve:
+//
+//   req.organizationId → empresa_id activo (se usa como tenant en los CRUD)
+//   req.orgRole        → nombre del primer rol asignado en roles_usuarios
+//
+// Esto reemplaza a la tabla `membresias` del esquema anterior: el RBAC ahora
+// vive en usuarios + roles_usuarios + roles (RF-01 / RF-09).
 
 import { NextFunction, Request, Response } from 'express';
 import supabase from '../config/supabaseClient';
-import { config } from '../config/global';
+
+interface UsuarioRow {
+  usuario_id: number;
+  email: string;
+  empresa_id: number | null;
+  estado: string;
+}
 
 /** Devuelve 401 si no hay token válido. */
 export const sessionAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -33,11 +48,11 @@ export const sessionAuth = async (req: Request, res: Response, next: NextFunctio
 };
 
 /**
- * Resuelve la organización activa y el rol del usuario dentro de ella.
+ * Resuelve la empresa activa y el rol del usuario dentro de ella.
  * Debe ejecutarse DESPUÉS de `sessionAuth`.
  *
- * Reglas (RF-01 / P0): un usuario ajeno no puede leer ni editar otra
- * organización; toda consulta queda acotada a `req.organizationId`.
+ * Reglas (RF-01 / P0): un usuario ajeno no puede leer ni editar los registros
+ * de otra empresa; el tenant se resuelve desde su fila en `usuarios`.
  */
 export const orgContext = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -46,36 +61,55 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    const requestedOrg = (req.headers['x-org-id'] as string | undefined)?.trim();
-    const organizationId = requestedOrg || config.defaultOrganizationId;
-
-    const query = supabase
-      .from('membresias')
-      .select('organization_id, rol, activo')
-      .eq('user_id', req.userId);
-
-    const { data: memberships, error } = organizationId
-      ? await query.eq('organization_id', organizationId)
-      : await query;
-
-    if (error) throw new Error(error.message);
-
-    const active = (memberships ?? []).filter((m) => m.activo !== false);
-    if (active.length === 0) {
-      res.status(403).json({ message: 'El usuario no pertenece a ninguna organización activa' });
+    const email = (req.user as { email?: string } | undefined)?.email;
+    if (!email) {
+      res.status(401).json({ message: 'El token no incluye un correo de acceso' });
       return;
     }
 
-    const membership = active.find((m) => m.organization_id === organizationId) ?? active[0];
-    req.organizationId = membership.organization_id;
-    req.orgRole = membership.rol;
+    const { data: usuario, error: usuarioError } = await supabase
+      .from('usuarios')
+      .select('usuario_id, email, empresa_id, estado')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (usuarioError) throw new Error(usuarioError.message);
+
+    const local = usuario as UsuarioRow | null;
+    if (!local || local.estado === 'inactivo') {
+      res.status(403).json({ message: 'El usuario no tiene una cuenta activa en la plataforma' });
+      return;
+    }
+
+    const empresaSolicitada = (req.headers['x-empresa-id'] as string | undefined)?.trim();
+    const empresaId = empresaSolicitada || (local.empresa_id != null ? String(local.empresa_id) : '');
+
+    if (!empresaId) {
+      res.status(403).json({ message: 'El usuario no tiene una empresa asignada' });
+      return;
+    }
+
+    const { data: asignaciones, error: rolesError } = await supabase
+      .from('roles_usuarios')
+      .select('rol_id, estado, roles(nombre, estado)')
+      .eq('usuario_id', local.usuario_id)
+      .eq('estado', 'activo');
+
+    if (rolesError) throw new Error(rolesError.message);
+
+    const rol = (asignaciones ?? [])
+      .map((asignacion) => (asignacion.roles as unknown as { nombre?: string; estado?: string } | null)?.nombre)
+      .find((nombre): nombre is string => Boolean(nombre));
+
+    req.organizationId = empresaId;
+    req.orgRole = rol;
     next();
   } catch (error) {
-    res.status(500).json({ message: error instanceof Error ? error.message : 'Error de contexto de organización' });
+    res.status(500).json({ message: error instanceof Error ? error.message : 'Error de contexto de empresa' });
   }
 };
 
 /**
- * Middlewares combinados usados por los routers CRUD: sesión + organización.
+ * Middlewares combinados usados por los routers CRUD: sesión + empresa.
  */
 export const requireOrg = [sessionAuth, orgContext];

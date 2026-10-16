@@ -1,27 +1,30 @@
 // services/auth.service.ts
-// Registro, login y perfil de IMVOLT sobre Supabase Auth + tablas propias.
+// Registro, login y perfil del usuario IMVOLT sobre Supabase Auth + tablas del
+// diagrama relacional.
 //
-// Registro multi-empresa (§03): "una cuenta personal de agente se modela como
-// una organización pequeña, no como una excepción al esquema". Al registrarse
-// se crea:
-//   1. el usuario en Supabase Auth,
-//   2. la organización (tenant),
-//   3. la membresía con rol `propietario`,
-//   4. la wallet de créditos con los créditos de bienvenida.
+// Registro multi-empresa: "una cuenta personal de agente se modela como una
+// empresa pequeña, no como una excepción al esquema". Al registrarse se crea:
+//   1. el usuario en Supabase Auth (credenciales),
+//   2. la empresa (tenant) en `empresas`,
+//   3. la fila local del usuario en `usuarios`,
+//   4. la asignación del rol `propietario` en `roles_usuarios`.
+//
+// El acceso posterior resuelve empresa y rol en `middlewares/sessionAuth`.
 
 import supabase from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
-import { Membresia, Organizacion, Usuario } from '../models/identity.model';
-import { creditsService } from './credits.service';
+import { Usuario } from '../models/identity/usuario.model';
 
 export interface RegisterInput {
   email: string;
   password: string;
   nombres: string;
   apellidos: string;
+  telefono?: string;
+  /** Razón social de la empresa creada junto a la cuenta. */
   organization_name: string;
-  organization_type: 'desarrollador' | 'inmobiliaria' | 'agente';
-  pais?: string;
+  /** RUC (13 dígitos); puede quedar pendiente y completarse después. */
+  ruc?: string;
 }
 
 export interface SessionResult {
@@ -30,7 +33,13 @@ export interface SessionResult {
   user_id: string;
 }
 
-export async function register(input: RegisterInput): Promise<{ user_id: string }> {
+export interface RegisterResult {
+  user_id: string;
+  empresa_id: number | null;
+  usuario_id: number | null;
+}
+
+export async function register(input: RegisterInput): Promise<RegisterResult> {
   const { data, error } = await supabase.auth.admin.createUser({
     email: input.email,
     password: input.password,
@@ -44,45 +53,79 @@ export async function register(input: RegisterInput): Promise<{ user_id: string 
 
   const userId = data.user!.id;
 
-  const { data: org, error: orgError } = await supabase
-    .from('organizaciones')
+  // 1) Empresa (tenant)
+  const { data: empresa, error: empresaError } = await supabase
+    .from('empresas')
     .insert([
       {
-        nombre: input.organization_name,
-        tipo: input.organization_type,
-        pais: input.pais ?? 'Ecuador',
-        activo: true,
+        razon_social: input.organization_name,
+        ruc: input.ruc ?? null,
+        estado: 'activo',
       },
     ])
     .select()
     .single();
 
-  if (orgError) throw new HttpError(500, `No se pudo crear la organización: ${orgError.message}`);
+  if (empresaError) {
+    throw new HttpError(500, `No se pudo crear la empresa: ${empresaError.message}`);
+  }
 
-  const { error: memberError } = await supabase.from('membresias').insert([
+  const empresaId = (empresa as { empresa_id: number }).empresa_id;
+
+  // 2) Usuario local (vinculado por email con Supabase Auth)
+  const { data: usuario, error: usuarioError } = await supabase
+    .from('usuarios')
+    .insert([
+      {
+        nombre: `${input.nombres} ${input.apellidos}`.trim(),
+        email: input.email,
+        telefono: input.telefono ?? null,
+        empresa_id: empresaId,
+        estado: 'activo',
+      },
+    ])
+    .select()
+    .single();
+
+  if (usuarioError) {
+    throw new HttpError(500, `No se pudo crear el usuario: ${usuarioError.message}`);
+  }
+
+  const usuarioId = (usuario as Usuario).usuario_id;
+
+  // 3) Rol propietario (se crea en la semilla; si no existe, se crea aquí)
+  const { data: rolExistente } = await supabase
+    .from('roles')
+    .select('rol_id')
+    .eq('nombre', 'propietario')
+    .maybeSingle();
+
+  let rolId = (rolExistente as { rol_id: number } | null)?.rol_id ?? null;
+
+  if (!rolId) {
+    const { data: rolNuevo, error: rolError } = await supabase
+      .from('roles')
+      .insert([{ nombre: 'propietario', estado: 'activo' }])
+      .select()
+      .single();
+
+    if (rolError) throw new HttpError(500, `No se pudo crear el rol: ${rolError.message}`);
+    rolId = (rolNuevo as { rol_id: number }).rol_id;
+  }
+
+  const { error: asignacionError } = await supabase.from('roles_usuarios').insert([
     {
-      user_id: userId,
-      organization_id: (org as Organizacion).organization_id,
-      rol: 'propietario',
-      activo: true,
+      usuario_id: usuarioId,
+      rol_id: rolId,
+      estado: 'activo',
     },
   ]);
 
-  if (memberError) throw new HttpError(500, `No se pudo crear la membresía: ${memberError.message}`);
+  if (asignacionError) {
+    throw new HttpError(500, `No se pudo asignar el rol: ${asignacionError.message}`);
+  }
 
-  await supabase.from('usuarios').insert([
-    {
-      user_id: userId,
-      nombres: input.nombres,
-      apellidos: input.apellidos,
-      email: input.email,
-      activo: true,
-    },
-  ]);
-
-  await creditsService.bootstrap((org as Organizacion).organization_id);
-
-  return { user_id: userId };
+  return { user_id: userId, empresa_id: empresaId, usuario_id: usuarioId };
 }
 
 export async function login(email: string, password: string): Promise<SessionResult> {
@@ -99,23 +142,46 @@ export async function login(email: string, password: string): Promise<SessionRes
   };
 }
 
-export async function me(userId: string): Promise<{
-  usuario: Usuario | null;
-  membresias: Array<Pick<Membresia, 'membership_id' | 'organization_id' | 'rol'> & { organizacion: Pick<Organizacion, 'nombre' | 'tipo'> | null }>;
+/** Perfil local del usuario + roles asignados dentro de su empresa. */
+export async function me(email: string | undefined): Promise<{
+  usuario: (Usuario & { empresa: { empresa_id: number; razon_social: string } | null }) | null;
+  roles: Array<{ usuario_rol_id: number; rol_id: number; nombre: string }>;
 }> {
-  const { data: usuario } = await supabase.from('usuarios').select('*').eq('user_id', userId).maybeSingle();
+  if (!email) {
+    throw new HttpError(401, 'El token no incluye un correo de acceso');
+  }
 
-  const { data: membresias } = await supabase
-    .from('membresias')
-    .select('membership_id, organization_id, rol, organizaciones(nombre, tipo)')
-    .eq('user_id', userId)
-    .eq('activo', true);
+  const { data: usuario, error } = await supabase
+    .from('usuarios')
+    .select('*, empresas(empresa_id, razon_social)')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (error) throw new HttpError(500, `No se pudo leer el usuario: ${error.message}`);
+  if (!usuario) throw new HttpError(404, 'El usuario no tiene una cuenta registrada en la plataforma');
+
+  const fila = usuario as Usuario & { empresas: { empresa_id: number; razon_social: string } | null };
+
+  const { data: asignaciones } = await supabase
+    .from('roles_usuarios')
+    .select('usuario_rol_id, rol_id, estado, roles(nombre)')
+    .eq('usuario_id', fila.usuario_id)
+    .eq('estado', 'activo');
+
+  const roles = (asignaciones ?? []).map((asignacion) => {
+    const rol = asignacion.roles as unknown as { nombre: string } | null;
+    return {
+      usuario_rol_id: asignacion.usuario_rol_id,
+      rol_id: asignacion.rol_id,
+      nombre: rol?.nombre ?? 'sin-rol',
+    };
+  });
+
+  const { empresas, ...resto } = fila;
 
   return {
-    usuario: (usuario as Usuario) ?? null,
-    membresias: ((membresias ?? []) as unknown as Array<
-      Pick<Membresia, 'membership_id' | 'organization_id' | 'rol'> & { organizaciones: Pick<Organizacion, 'nombre' | 'tipo'> | null }
-    >).map(({ organizaciones, ...rest }) => ({ ...rest, organizacion: organizaciones ?? null })),
+    usuario: { ...resto, empresa: empresas ?? null },
+    roles,
   };
 }
 

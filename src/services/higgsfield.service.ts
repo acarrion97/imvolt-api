@@ -15,7 +15,7 @@
 
 import axios from 'axios';
 import { config } from '../config/global';
-import { MediaType } from '../models/creative.model';
+import { MediaType } from '../models/creative/media.model';
 
 export interface HiggsfieldQuote {
   creditos: number;

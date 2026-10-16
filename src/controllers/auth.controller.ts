@@ -2,10 +2,9 @@
 // Registro, login y perfil del usuario autenticado.
 
 import { Request, Response } from 'express';
-import { authService } from '../services/auth.service';
+import { authService, RegisterInput } from '../services/auth.service';
 import { sessionAuth, orgContext } from '../middlewares/sessionAuth';
 import { ValidationError } from '../core/errors';
-import { RegisterInput } from '../services/auth.service';
 
 const send = (res: Response, error: unknown): void => {
   if (error && typeof error === 'object' && 'statusCode' in error) {
@@ -17,15 +16,15 @@ const send = (res: Response, error: unknown): void => {
 };
 
 export class AuthController {
-  /** POST /auth/register — crea cuenta + organización + membresía + wallet. */
+  /** POST /auth/register — crea cuenta + empresa + usuario + rol propietario. */
   static register = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password, nombres, apellidos, organization_name, organization_type, pais } =
+      const { email, password, nombres, apellidos, telefono, organization_name, ruc } =
         req.body as Partial<RegisterInput>;
 
-      if (!email || !password || !nombres || !apellidos || !organization_name || !organization_type) {
+      if (!email || !password || !nombres || !apellidos || !organization_name) {
         throw new ValidationError('Faltan campos obligatorios del registro', [
-          { field: 'email', message: 'email, password, nombres, apellidos, organization_name y organization_type son requeridos' },
+          { field: 'email', message: 'email, password, nombres, apellidos y organization_name son requeridos' },
         ]);
       }
 
@@ -34,12 +33,12 @@ export class AuthController {
         password,
         nombres,
         apellidos,
+        telefono,
         organization_name,
-        organization_type: organization_type as RegisterInput['organization_type'],
-        pais,
+        ruc,
       });
 
-      res.status(201).json({ message: 'Cuenta creada correctamente', user_id: result.user_id });
+      res.status(201).json({ message: 'Cuenta creada correctamente', ...result });
     } catch (error) {
       send(res, error);
     }
@@ -58,10 +57,11 @@ export class AuthController {
     }
   };
 
-  /** GET /auth/me — perfil + membresías del usuario autenticado. */
+  /** GET /auth/me — perfil local + roles del usuario autenticado. */
   static me = async (req: Request, res: Response): Promise<void> => {
     try {
-      res.json(await authService.me(req.userId!));
+      const email = (req.user as { email?: string } | undefined)?.email;
+      res.json(await authService.me(email));
     } catch (error) {
       send(res, error);
     }

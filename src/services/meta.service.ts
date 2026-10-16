@@ -12,7 +12,7 @@
 
 import { config } from '../config/global';
 import { HttpError } from '../core/errors';
-import { Campana, MetaConnection } from '../models/advertising.model';
+import { Campana, MetaConnection } from '../models/advertising/meta.model';
 
 export interface ValidationResult {
   valido: boolean;

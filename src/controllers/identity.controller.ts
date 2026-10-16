@@ -1,82 +1,150 @@
 // controllers/identity.controller.ts
-// Módulos de identidad: organizaciones (tenants), usuarios y membresías.
+// CRUD del módulo Identidad (diagrama relacional):
+// empresas, usuarios, roles, permisos, asignaciones rol↔usuario y rol↔permiso,
+// hitos de lanzamiento, configuraciones de integración y sus vínculos.
+//
+// El CRUD genérico vive en `core/crud.factory`: cada export es un router
+// Express completo (GET /, GET /:id, POST /, PUT /:id, PATCH /:id, DELETE /:id)
+// con validación (Request), vista de respuesta (Resource), sesión y RBAC.
 
-import { Request, Response } from 'express';
 import { createCrudRouter } from '../core/crud.factory';
-import { organizacionRequest, usuarioRequest, membresiaRequest } from '../requests/identity.request';
-import { organizacionResource, usuarioResource, membresiaResource } from '../resources/identity.resource';
+import {
+  configuracionIntegracionRequest,
+  empresaHitoRequest,
+  empresaIntegracionRequest,
+  empresaRequest,
+  hitoLanzamientoRequest,
+  permisoRequest,
+  rolPermisoRequest,
+  rolRequest,
+  usuarioRequest,
+  usuarioRolRequest,
+} from '../requests/identity.request';
+import {
+  configuracionIntegracionResource,
+  empresaHitoResource,
+  empresaIntegracionResource,
+  empresaResource,
+  hitoLanzamientoResource,
+  permisoResource,
+  rolPermisoResource,
+  rolResource,
+  usuarioResource,
+  usuarioRolResource,
+} from '../resources/identity.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { filterByOrg, assignOrgOnCreate } from '../middlewares/tenantScope';
+import { assignEmpresaOnCreate, filterByEmpresa } from '../middlewares/tenantScope';
 import { writeByOwnerOrAdmin } from '../middlewares/requireRole';
-import supabase from '../config/supabaseClient';
 
-// ── Organizaciones (RF-01: acceso multiempresa aislado) ─────────────────────
-export const { router: organizacionRouter } = createCrudRouter({
-  table: 'organizaciones',
-  primaryKey: 'organization_id',
-  request: organizacionRequest,
-  resource: organizacionResource,
-  entityName: 'Organización',
+const SEGMENTO = {
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByOwnerOrAdmin, assignOrgOnCreate],
-  tenantScoped: true,
-  defaultGetAllOptions: { orderBy: 'created_at', ascending: false },
-});
+  writeMiddlewares: [writeByOwnerOrAdmin],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+};
 
-// ── Membresías (roles por organización) ─────────────────────────────────────
-export const { router: membresiaRouter } = createCrudRouter({
-  table: 'membresias',
-  primaryKey: 'membership_id',
-  request: membresiaRequest,
-  resource: membresiaResource,
-  entityName: 'Membresía',
-  middlewares: [...requireOrg, filterByOrg],
-  writeMiddlewares: [writeByOwnerOrAdmin, assignOrgOnCreate],
-  tenantScoped: true,
-  defaultGetAllOptions: { orderBy: 'created_at', ascending: false },
+// ── Empresas (tenant) ───────────────────────────────────────────────────────
+export const { router: empresaRouter } = createCrudRouter({
+  table: 'empresas',
+  primaryKey: 'empresa_id',
+  request: empresaRequest,
+  resource: empresaResource,
+  entityName: 'Empresa',
+  ...SEGMENTO,
 });
 
 // ── Usuarios ────────────────────────────────────────────────────────────────
-// El listado se acota a los usuarios con membresía activa en la organización
-// activa: nunca se exponen perfiles de otras empresas.
-const usuarios = createCrudRouter({
+export const { router: usuarioRouter } = createCrudRouter({
   table: 'usuarios',
-  primaryKey: 'user_id',
+  primaryKey: 'usuario_id',
+  joins: ['empresas(*)'],
   request: usuarioRequest,
   resource: usuarioResource,
   entityName: 'Usuario',
-  middlewares: [...requireOrg],
-  tenantScoped: false,
-  handlers: {
-    getAll: async (req: Request, res: Response) => {
-      try {
-        const { data: memberships, error: memberError } = await supabase
-          .from('membresias')
-          .select('user_id')
-          .eq('organization_id', req.organizationId!)
-          .eq('activo', true);
-
-        if (memberError) throw new Error(memberError.message);
-
-        const ids = (memberships ?? []).map((m) => m.user_id as string);
-        if (ids.length === 0) {
-          res.json([]);
-          return;
-        }
-
-        const { data: users, error: usersError } = await supabase
-          .from('usuarios')
-          .select('*')
-          .in('user_id', ids)
-          .order('nombres', { ascending: true });
-
-        if (usersError) throw new Error(usersError.message);
-        res.json(usuarioResource.formatMany(users ?? []));
-      } catch (error) {
-        res.status(500).json({ message: error instanceof Error ? error.message : 'Error al listar usuarios' });
-      }
-    },
-  },
+  middlewares: [...requireOrg, filterByEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, assignEmpresaOnCreate],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 });
 
-export const { router: usuarioRouter } = usuarios;
+// ── Roles ───────────────────────────────────────────────────────────────────
+export const { router: rolRouter } = createCrudRouter({
+  table: 'roles',
+  primaryKey: 'rol_id',
+  request: rolRequest,
+  resource: rolResource,
+  entityName: 'Rol',
+  ...SEGMENTO,
+});
+
+// ── Permisos ────────────────────────────────────────────────────────────────
+export const { router: permisoRouter } = createCrudRouter({
+  table: 'permisos',
+  primaryKey: 'permiso_id',
+  request: permisoRequest,
+  resource: permisoResource,
+  entityName: 'Permiso',
+  ...SEGMENTO,
+});
+
+// ── Roles ↔ Usuarios ────────────────────────────────────────────────────────
+export const { router: usuarioRolRouter } = createCrudRouter({
+  table: 'roles_usuarios',
+  primaryKey: 'usuario_rol_id',
+  joins: ['usuarios(*, empresas(*))', 'roles(*)'],
+  request: usuarioRolRequest,
+  resource: usuarioRolResource,
+  entityName: 'Asignación de rol',
+  ...SEGMENTO,
+});
+
+// ── Roles ↔ Permisos ────────────────────────────────────────────────────────
+export const { router: rolPermisoRouter } = createCrudRouter({
+  table: 'roles_permisos',
+  primaryKey: 'permiso_rol_id',
+  joins: ['roles(*)', 'permisos(*)'],
+  request: rolPermisoRequest,
+  resource: rolPermisoResource,
+  entityName: 'Permiso de rol',
+  ...SEGMENTO,
+});
+
+// ── Hitos de lanzamiento ────────────────────────────────────────────────────
+export const { router: hitoLanzamientoRouter } = createCrudRouter({
+  table: 'hitos_lanzamientos',
+  primaryKey: 'hito_lanzamiento_id',
+  request: hitoLanzamientoRequest,
+  resource: hitoLanzamientoResource,
+  entityName: 'Hito de lanzamiento',
+  ...SEGMENTO,
+});
+
+// ── Hitos por empresa ───────────────────────────────────────────────────────
+export const { router: empresaHitoRouter } = createCrudRouter({
+  table: 'empresas_hitos',
+  primaryKey: 'empresa_hito_id',
+  joins: ['empresas(*)', 'hitos_lanzamientos(*)'],
+  request: empresaHitoRequest,
+  resource: empresaHitoResource,
+  entityName: 'Hito de la empresa',
+  ...SEGMENTO,
+});
+
+// ── Configuración de integración ────────────────────────────────────────────
+export const { router: configuracionIntegracionRouter } = createCrudRouter({
+  table: 'configuraciones_integraciones',
+  primaryKey: 'configuracion_integracion_id',
+  request: configuracionIntegracionRequest,
+  resource: configuracionIntegracionResource,
+  entityName: 'Configuración de integración',
+  ...SEGMENTO,
+});
+
+// ── Integraciones por empresa ───────────────────────────────────────────────
+export const { router: empresaIntegracionRouter } = createCrudRouter({
+  table: 'empresas_integraciones',
+  primaryKey: 'empresa_integracion_id',
+  joins: ['empresas(*)', 'integraciones(*)', 'configuraciones_integraciones(*)'],
+  request: empresaIntegracionRequest,
+  resource: empresaIntegracionResource,
+  entityName: 'Integración de la empresa',
+  ...SEGMENTO,
+});

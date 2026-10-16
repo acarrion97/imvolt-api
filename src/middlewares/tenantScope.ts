@@ -1,29 +1,31 @@
 // middlewares/tenantScope.ts
-// Acota cada operación CRUD a la organización activa del contexto.
+// Acota cada operación CRUD a la empresa activa del contexto.
 //
-// Debe usarse DESPUÉS de `orgContext` en los routers CRUD:
-//   - GET  /  → fuerza el filtro organization_id en el listado.
-//   - POST /  → inyecta organization_id en el payload de creación.
-//   - PUT/PATCH/DELETE /:id → el controller re-verifica pertenencia.
+// `orgContext` (sessionAuth) resuelve la empresa del usuario autenticado y la
+// deja en `req.organizationId`. Estos middlewares la aplican a las tablas que
+// tienen columna `empresa_id`:
 //
-// Así se cumplen los invariantes de multi-tenant del documento maestro (§13):
-// "restricciones, índices e invariantes de integridad para impedir cruces
-// entre organizaciones".
+//   - GET  /  → fuerza el filtro `empresa_id` en el listado.
+//   - POST /  → inyecta `empresa_id` en el payload de creación (si el cliente
+//               no lo envía) para impedir cruces entre empresas.
+//
+// Las tablas globales (roles, permisos, formatos, tipos, objetivos…) no los
+// usan: son catálogos compartidos por todas las empresas.
 
 import { NextFunction, Request, Response } from 'express';
 
-/** Fuerza `organization_id` como filtro en GET / (listados). */
-export const filterByOrg = (req: Request, _res: Response, next: NextFunction): void => {
+/** Fuerza `empresa_id` como filtro en GET / (listados). */
+export const filterByEmpresa = (req: Request, _res: Response, next: NextFunction): void => {
   if (req.organizationId) {
-    (req.query as Record<string, unknown>).organization_id = req.organizationId;
+    (req.query as Record<string, unknown>).empresa_id = req.organizationId;
   }
   next();
 };
 
-/** Inyecta `organization_id` en el body de creación. */
-export const assignOrgOnCreate = (req: Request, _res: Response, next: NextFunction): void => {
-  if (req.organizationId && req.body && typeof req.body === 'object') {
-    req.body = { ...req.body, organization_id: req.organizationId };
+/** Inyecta `empresa_id` en el body de creación (no pisa un valor explícito). */
+export const assignEmpresaOnCreate = (req: Request, _res: Response, next: NextFunction): void => {
+  if (req.organizationId && req.body && typeof req.body === 'object' && req.body.empresa_id === undefined) {
+    req.body = { ...req.body, empresa_id: req.organizationId };
   }
   next();
 };

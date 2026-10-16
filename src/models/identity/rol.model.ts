@@ -1,4 +1,4 @@
-import { BaseModel } from "../core";
+import { BaseModel } from "../../core";
 
 export interface Rol extends BaseModel<Rol> {
     rol_id: number;

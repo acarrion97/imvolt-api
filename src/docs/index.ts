@@ -1,0 +1,264 @@
+// docs/index.ts
+// Especificación OpenAPI generada para los módulos CRUD del API.
+//
+// `src/index.ts` fusiona esta especificación con las rutas documentadas a
+// mano (@swagger) en `src/routes/*.ts`:
+//
+//   const spec = { ...swaggerJsdoc(options), paths: { ...openapiCrudPaths, ...comentadas } }
+//
+// Así los CRUDs quedan documentados de forma consistente (esquemas, ejemplos
+// y respuestas de error compartidas) y los endpoints de negocio conservan su
+// documentación junto al router.
+
+import {
+  openapiParameters,
+  openapiResponses,
+  openapiSchemas as errorSchemas,
+  openapiTags,
+  securitySchemes,
+} from './components';
+import { crudPaths, CrudDocConfig } from './crud-paths';
+import { openapiSchemas } from './schemas';
+
+/** Módulos CRUD del API y sus rutas (deben coincidir con `src/index.ts`). */
+export const crudModules: CrudDocConfig[] = [
+  // ── Identidad ────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/empresas',
+    tag: 'Identidad',
+    schema: 'Empresa',
+    entity: 'Empresa',
+    female: true,
+    idExample: 1,
+    filters: [{ name: 'ruc', description: 'Filtra por RUC exacto', type: 'string', example: '1792345678001' }],
+  },
+  {
+    path: '/api/v1/usuarios',
+    tag: 'Identidad',
+    schema: 'Usuario',
+    entity: 'Usuario',
+    idExample: 7,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      { name: 'email', description: 'Filtra por correo exacto', type: 'string', example: 'andrea.salazar@imvolt.ec' },
+    ],
+  },
+  {
+    path: '/api/v1/roles',
+    tag: 'Identidad',
+    schema: 'Rol',
+    entity: 'Rol',
+    idExample: 2,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del rol', type: 'string', example: 'marketing' }],
+  },
+  {
+    path: '/api/v1/permisos',
+    tag: 'Identidad',
+    schema: 'Permiso',
+    entity: 'Permiso',
+    idExample: 5,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del permiso', type: 'string', example: 'publicar_campanas' }],
+  },
+  {
+    path: '/api/v1/roles-usuarios',
+    tag: 'Identidad',
+    schema: 'UsuarioRol',
+    entity: 'Asignación de rol a usuario',
+    plural: 'Asignaciones de rol a usuario',
+    female: true,
+    idExample: 3,
+    filters: [
+      { name: 'usuario_id', description: 'Filtra por usuario', example: 7 },
+      { name: 'rol_id', description: 'Filtra por rol', example: 2 },
+    ],
+  },
+  {
+    path: '/api/v1/roles-permisos',
+    tag: 'Identidad',
+    schema: 'RolPermiso',
+    entity: 'Permiso de rol',
+    plural: 'Permisos de rol',
+    idExample: 11,
+    filters: [
+      { name: 'rol_id', description: 'Filtra por rol', example: 2 },
+      { name: 'permiso_id', description: 'Filtra por permiso', example: 5 },
+    ],
+  },
+  {
+    path: '/api/v1/hitos-lanzamiento',
+    tag: 'Identidad',
+    schema: 'HitoLanzamiento',
+    entity: 'Hito de lanzamiento',
+    plural: 'Hitos de lanzamiento',
+    idExample: 1,
+  },
+  {
+    path: '/api/v1/empresas-hitos',
+    tag: 'Identidad',
+    schema: 'EmpresaHito',
+    entity: 'Hito de la empresa',
+    plural: 'Hitos de la empresa',
+    idExample: 4,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa', example: 1 },
+      { name: 'hito_lanzamiento_id', description: 'Filtra por hito', example: 1 },
+    ],
+  },
+  {
+    path: '/api/v1/configuraciones-integraciones',
+    tag: 'Identidad',
+    schema: 'ConfiguracionIntegracion',
+    entity: 'Configuración de integración',
+    plural: 'Configuraciones de integración',
+    female: true,
+    idExample: 2,
+    filters: [{ name: 'entorno', description: 'Filtra por entorno', type: 'string', example: 'produccion' }],
+  },
+  {
+    path: '/api/v1/empresas-integraciones',
+    tag: 'Identidad',
+    schema: 'EmpresaIntegracion',
+    entity: 'Integración de la empresa',
+    plural: 'Integraciones de la empresa',
+    female: true,
+    idExample: 6,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa', example: 1 },
+      { name: 'integracion_id', description: 'Filtra por tipo de integración', example: 1 },
+    ],
+  },
+
+  // ── Propiedades ──────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/propiedades',
+    tag: 'Propiedades',
+    schema: 'Propiedad',
+    entity: 'Propiedad',
+    female: true,
+    idExample: 3,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      { name: 'tipo_propiedad_id', description: 'Filtra por tipo de inmueble', example: 1 },
+      {
+        name: 'disponibilidad',
+        description: 'Filtra por estado comercial',
+        type: 'string',
+        enum: ['disponible', 'reservada', 'vendida', 'no_disponible'],
+      },
+    ],
+  },
+  {
+    path: '/api/v1/tipos-propiedad',
+    tag: 'Propiedades',
+    schema: 'TipoPropiedad',
+    entity: 'Tipo de propiedad',
+    plural: 'Tipos de propiedad',
+    idExample: 1,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del tipo', type: 'string', example: 'Lote' }],
+  },
+
+  // ── Creative ─────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/plantillas',
+    tag: 'Creative',
+    schema: 'Plantilla',
+    entity: 'Plantilla',
+    female: true,
+    idExample: 2,
+    filters: [{ name: 'tipo_plantilla_id', description: 'Filtra por categoría de plantilla', example: 1 }],
+  },
+  {
+    path: '/api/v1/tipos-plantilla',
+    tag: 'Creative',
+    schema: 'TipoPlantilla',
+    entity: 'Tipo de plantilla',
+    plural: 'Tipos de plantilla',
+    idExample: 1,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre de la categoría', type: 'string', example: 'terrenos' }],
+  },
+  {
+    path: '/api/v1/formatos',
+    tag: 'Creative',
+    schema: 'Formato',
+    entity: 'Formato',
+    idExample: 1,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del formato', type: 'string', example: '9:16 Reels' }],
+  },
+  {
+    path: '/api/v1/enfoques-comerciales',
+    tag: 'Creative',
+    schema: 'EnfoqueComercial',
+    entity: 'Enfoque comercial',
+    idExample: 2,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del enfoque', type: 'string', example: 'Inversión' }],
+  },
+  {
+    path: '/api/v1/contenidos-ia',
+    tag: 'Creative',
+    schema: 'ContenidoIa',
+    entity: 'Contenido IA',
+    plural: 'Contenidos IA',
+    idExample: 9,
+    filters: [
+      { name: 'propiedad_id', description: 'Filtra por propiedad promocionada', example: 3 },
+      { name: 'plantilla_id', description: 'Filtra por plantilla usada', example: 2 },
+      { name: 'formato_id', description: 'Filtra por formato de salida', example: 1 },
+    ],
+  },
+
+  // ── Publicidad ───────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/objetivos-publicidad',
+    tag: 'Publicidad',
+    schema: 'ObjetivoPublicidad',
+    entity: 'Objetivo de publicidad',
+    idExample: 1,
+    filters: [{ name: 'nombre', description: 'Filtra por nombre del objetivo', type: 'string', example: 'Mensajes' }],
+  },
+  {
+    path: '/api/v1/campanias-publicitarias',
+    tag: 'Publicidad',
+    schema: 'CampaniaPublicitaria',
+    entity: 'Campaña publicitaria',
+    female: true,
+    idExample: 5,
+    filters: [
+      { name: 'propiedad_id', description: 'Filtra por propiedad promocionada', example: 3 },
+      { name: 'objetivo_publicidad_id', description: 'Filtra por objetivo', example: 1 },
+    ],
+  },
+
+  // ── Leads ────────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/contactos',
+    tag: 'Leads',
+    schema: 'Contacto',
+    entity: 'Contacto',
+    idExample: 42,
+    filters: [
+      {
+        name: 'origen',
+        description: 'Filtra por canal de captación',
+        type: 'string',
+        enum: ['meta_formulario', 'whatsapp', 'landing', 'manual', 'referido'],
+      },
+      { name: 'propiedad_id', description: 'Filtra por inmueble consultado', example: 3 },
+    ],
+  },
+];
+
+/** Componentes OpenAPI (esquemas, parámetros, respuestas y seguridad). */
+export const openapiComponents = {
+  securitySchemes,
+  parameters: openapiParameters,
+  responses: openapiResponses,
+  schemas: { ...errorSchemas, ...openapiSchemas },
+};
+
+/** Rutas OpenAPI de todos los módulos CRUD. */
+export const openapiCrudPaths: Record<string, any> = crudModules.reduce<Record<string, any>>(
+  (acc, module) => Object.assign(acc, crudPaths(module)),
+  {}
+);
+
+export { openapiTags };

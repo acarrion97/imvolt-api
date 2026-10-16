@@ -1,85 +1,63 @@
 // requests/creative.request.ts
-// Validaciones del Estudio IA: plantillas, registro de modelos y generaciones.
+// Validaciones del módulo Creative: tipos de plantilla, plantillas, formatos,
+// enfoques comerciales y contenidos generados con IA.
 
 import Joi from 'joi';
-import { BaseRequest } from '../core/base.request';
+import { BaseRequest } from '../core';
+import { buildSchemas, fk } from './helpers';
 
-const uuid = Joi.string().uuid({ version: 'uuidv4' });
+// ── Tipos de plantilla ──────────────────────────────────────────────────────
+const tipoPlantillaShape = {
+  nombre: Joi.string().min(3).max(50).description('Categoría de la plantilla (p. ej. terrenos, vivienda, comercial)'),
+  descripcion: Joi.string().max(500).description('Qué representa esta categoría'),
+};
+
+export const tipoPlantillaRequest = new BaseRequest(
+  buildSchemas(tipoPlantillaShape, { required: ['nombre', 'descripcion'] })
+);
 
 // ── Plantillas ──────────────────────────────────────────────────────────────
-const plantillaCreate = Joi.object({
-  template_id: uuid.optional(),
-  organization_id: uuid.allow(null).optional(), // null = plantilla del sistema
-  nombre: Joi.string().trim().min(3).max(120).required(),
-  categoria: Joi.string()
-    .valid('lotizaciones', 'casas', 'departamentos', 'proyecto_planos', 'publicidad_comercial', 'marca_inmobiliaria')
-    .required(),
-  objetivo: Joi.string().valid('visitas', 'mensajes', 'formularios', 'branding').required(),
-  media_type: Joi.string().valid('image', 'video').required(),
-  formato: Joi.string().valid('reels_9_16', 'imagen_4_5', 'feed_1_1', 'banner_16_9').required(),
-  variables: Joi.array().items(Joi.string().trim().max(60)).default([]),
-  estructura_narrativa: Joi.string().trim().max(1000).allow(null, '').optional(),
-  movimiento_camara: Joi.string().trim().max(200).allow(null, '').optional(),
-  estilo_visual: Joi.string().trim().max(200).allow(null, '').optional(),
-  prompt_base: Joi.string().trim().min(10).max(4000).required(),
-  requiere_referencia_original: Joi.boolean().default(false),
-  creditos_base: Joi.number().min(0).default(1),
-  activo: Joi.boolean().default(true),
-});
+const plantillaShape = {
+  nombre: Joi.string().min(3).max(50).description('Nombre de la plantilla creativa'),
+  descripcion: Joi.string().max(500).allow(null, '').description('Qué produce la plantilla'),
+  url_logo: Joi.string().uri({ allowRelative: false }).max(200).allow(null, '').description('Logo aplicado a la pieza'),
+  tipo_plantilla_id: fk().description('Categoría de la plantilla'),
+};
 
-export const plantillaRequest = new BaseRequest({
-  create: plantillaCreate,
-  update: plantillaCreate.fork(['nombre', 'categoria', 'objetivo', 'media_type', 'formato', 'prompt_base'], (s) =>
-    s.optional(),
-  ).min(1),
-});
+export const plantillaRequest = new BaseRequest(
+  buildSchemas(plantillaShape, { required: ['nombre', 'tipo_plantilla_id'] })
+);
 
-// ── Registro de modelos ─────────────────────────────────────────────────────
-const modeloCreate = Joi.object({
-  model_id: uuid.optional(),
-  provider: Joi.string().trim().min(2).max(60).required(),
-  provider_model_id: Joi.string().trim().min(2).max(160).required(),
-  nombre: Joi.string().trim().min(2).max(120).required(),
-  media_type: Joi.string().valid('image', 'video').required(),
-  capabilities: Joi.object().unknown(true).default({}),
-  duracion_min_s: Joi.number().min(1).allow(null).optional(),
-  duracion_max_s: Joi.number().min(1).allow(null).optional(),
-  ratios: Joi.array().items(Joi.string().trim().max(10)).allow(null).optional(),
-  quote_creditos: Joi.number().min(0).default(1),
-  status: Joi.string().valid('activo', 'restringido', 'experimental', 'no_disponible').default('activo'),
-});
+// ── Formatos ────────────────────────────────────────────────────────────────
+const formatoShape = {
+  nombre: Joi.string().min(2).max(50).description('Nombre del formato (p. ej. 9:16 Reels, 1:1 Feed)'),
+  descripcion: Joi.string().max(500).allow(null, '').description('Uso recomendado del formato'),
+};
 
-export const modeloRequest = new BaseRequest({
-  create: modeloCreate,
-  update: modeloCreate.fork(['provider', 'provider_model_id', 'nombre', 'media_type'], (s) => s.optional()).min(1),
-});
+export const formatoRequest = new BaseRequest(
+  buildSchemas(formatoShape, { required: ['nombre'] })
+);
 
-// ── Generaciones (jobs IA) ──────────────────────────────────────────────────
-const generacionCreate = Joi.object({
-  property_id: uuid.allow(null).optional(),
-  template_id: uuid.allow(null).optional(),
-  model_id: uuid.required(),
-  modo: Joi.string().valid('facil', 'pro').default('facil'),
-  prompt: Joi.string().trim().min(10).max(6000).required(),
-  parametros: Joi.object()
-    .keys({
-      duration: Joi.number().min(1).max(60).optional(),
-      ratio: Joi.string().trim().max(10).optional(),
-      resolution: Joi.string().trim().max(20).optional(),
-      image_url: Joi.string().uri().optional(),
-    })
-    .unknown(true)
-    .default({}),
-  /** Clave de idempotencia para no duplicar cargos (§12). */
-  idempotency_key: Joi.string().trim().max(120).optional(),
-});
+// ── Enfoques comerciales ────────────────────────────────────────────────────
+const enfoqueComercialShape = {
+  nombre: Joi.string().min(3).max(50).description('Ángulo de venta (p. ej. inversión, primer hogar, exclusividad)'),
+  descripcion: Joi.string().max(500).allow(null, '').description('Cuándo usar este enfoque'),
+};
 
-export const generacionRequest = new BaseRequest({ create: generacionCreate });
+export const enfoqueComercialRequest = new BaseRequest(
+  buildSchemas(enfoqueComercialShape, { required: ['nombre'] })
+);
 
-// ── Estratega (salida estructurada del asistente) ───────────────────────────
-export const estrategaRequest = new BaseRequest({
-  create: Joi.object({
-    property_id: uuid.required(),
-    objetivo: Joi.string().valid('visitas', 'mensajes', 'formularios', 'branding').default('mensajes'),
-  }),
-});
+// ── Contenidos IA ───────────────────────────────────────────────────────────
+const contenidoIaShape = {
+  propiedad_id: fk().description('Propiedad promocionada'),
+  plantilla_id: fk().description('Plantilla creativa usada'),
+  formato_id: fk().description('Formato de salida'),
+  duracion: Joi.string().max(20).description('Duración solicitada (p. ej. "8 s"; vacío para imagen)'),
+  enfoque_comercial_id: fk().description('Enfoque comercial aplicado'),
+  url_imagen_referencia: Joi.string().uri({ allowRelative: false }).max(500).allow(null, '').description('Imagen de referencia que la IA debe preservar'),
+};
+
+export const contenidoIaRequest = new BaseRequest(
+  buildSchemas(contenidoIaShape, { required: ['propiedad_id', 'plantilla_id', 'formato_id', 'duracion', 'enfoque_comercial_id'] })
+);

@@ -12,6 +12,12 @@ import { NotFoundError } from './errors';
 export interface GetAllOptions {
   /** Columnas a seleccionar, por defecto '*'. */
   columns?: string[];
+  /**
+   * Relaciones (llaves foráneas) a incrustar en la respuesta, en sintaxis
+   * PostgREST: p. ej. `['empresas(*)', 'propiedades(*, empresas(*))']`.
+   * Si no se envía, se usan las declaradas en el constructor del servicio.
+   */
+  joins?: string[];
   /** Filtros exactos (WHERE eq). */
   where?: Record<string, unknown>;
   /** Columna de ordenamiento. */
@@ -25,8 +31,21 @@ export interface GetAllOptions {
 export class BaseService<T = any> {
   constructor(
     protected readonly table: string,
-    protected readonly primaryKey: string = 'id'
+    protected readonly primaryKey: string = 'id',
+    /**
+     * Relaciones (llaves foráneas) incrustadas por defecto en cada operación,
+     * en sintaxis PostgREST: p. ej. `['empresas(*)', 'tipos_propiedades(*)']`.
+     * El objeto incrustado llega con el nombre de la TABLA foránea; el Resource
+     * es quien lo renombra a singular (p. ej. `empresas` → `empresa`).
+     */
+    protected readonly joins: string[] = []
   ) {}
+
+  /** Cláusula SELECT: columnas + relaciones incrustadas. */
+  private selectStatement(columns: string[], extraJoins?: string[]): string {
+    const relations = extraJoins ?? this.joins;
+    return relations.length ? [...columns, ...relations].join(',') : columns.join(',');
+  }
 
   /** Registra una acción en la tabla de auditoría `audit_logs`. */
   async logAudit(action: string, userId: string, details: unknown): Promise<void> {
@@ -61,7 +80,7 @@ export class BaseService<T = any> {
       throw new Error('Debes especificar al menos una columna para generar la consulta.');
     }
 
-    let query = supabase.from(this.table).select(columns.join(','));
+    let query = supabase.from(this.table).select(this.selectStatement(columns, options.joins));
 
     Object.keys(where).forEach((key) => {
       query = query.eq(key, where[key] as never);
@@ -81,7 +100,7 @@ export class BaseService<T = any> {
   async getById<U = T>(id: string | number): Promise<U> {
     const { data, error } = await supabase
       .from(this.table)
-      .select('*')
+      .select(this.selectStatement(['*']))
       .eq(this.primaryKey, id)
       .maybeSingle();
 
@@ -107,7 +126,11 @@ export class BaseService<T = any> {
 
   /** Crea un registro a partir de un payload validado (Request). */
   async create<U = T>(payload: Partial<U>, userId?: string): Promise<U> {
-    const { data, error } = await supabase.from(this.table).insert([payload]).select().single();
+    const { data, error } = await supabase
+      .from(this.table)
+      .insert([payload])
+      .select(this.selectStatement(['*']))
+      .single();
     if (error) throw new Error(`Error al crear registro en '${this.table}': ${error.message}`);
     if (userId) await this.logAudit('CREATE', userId, { entity: payload });
     return data as U;
@@ -119,7 +142,7 @@ export class BaseService<T = any> {
       .from(this.table)
       .update(payload as never)
       .eq(this.primaryKey, id)
-      .select()
+      .select(this.selectStatement(['*']))
       .maybeSingle();
 
     if (error) throw new Error(`Error al actualizar registro en '${this.table}': ${error.message}`);

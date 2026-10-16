@@ -6,9 +6,14 @@
 // Todas las operaciones son idempotentes vía `idempotency_key`: un mismo
 // evento de proveedor no puede facturarse dos veces.
 
+// NOTA: DESHABILITADO — las tablas `credit_wallets` y `credit_transactions`
+// fueron retiradas de database/schema.sql al alinear la base con el diagrama
+// relacional. El servicio compila, pero hay que rehacer el modelo de créditos
+// antes de volver a exponerlo.
+
 import supabase from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
-import { CreditTransaction, CreditWallet, TipoMovimiento } from '../models/commerce.model';
+import { CreditTransaction, CreditWallet, TipoMovimiento } from '../models/commerce/credits.model';
 
 /** Créditos de bienvenida al registrar una organización (hipótesis a validar). */
 const WELCOME_CREDITS = 25;

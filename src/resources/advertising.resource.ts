@@ -1,60 +1,35 @@
 // resources/advertising.resource.ts
-// Vistas de IMVOLT Ads.
+// Vistas de respuesta del módulo Publicidad.
+//
+// `campania_publicitaria` incrusta su propiedad y su objetivo como subobjetos.
 
 import { BaseResource } from '../core/base.resource';
+import { CampaniaPublicitariaView } from '../models/advertising/campania_publicitaria.model';
+import { ObjetivoPublicidad } from '../models/advertising/objetivo_publicidad.model';
+import { propiedadResource } from './property.resource';
 
-const asArray = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : []);
-
-export const conexionResource = new BaseResource<any, Record<string, unknown>>((row) => ({
-  connection_id: row.connection_id,
-  organization_id: row.organization_id,
-  cuenta_publicitaria_id: row.cuenta_publicitaria_id,
-  nombre_cuenta: row.nombre_cuenta,
-  estado: row.estado,
-  permisos: asArray(row.permisos),
-  created_at: row.created_at,
-}));
-
-export const campanaResource = new BaseResource<any, Record<string, unknown>>((row) => ({
-  campaign_id: row.campaign_id,
-  organization_id: row.organization_id,
-  connection_id: row.connection_id ?? null,
-  property_id: row.property_id ?? null,
+export const objetivoPublicidadResource = new BaseResource<any, ObjetivoPublicidad>((row) => ({
+  objetivo_publicidad_id: row.objetivo_publicidad_id,
   nombre: row.nombre,
-  objetivo: row.objetivo,
-  destino: row.destino,
   estado: row.estado,
-  presupuesto_maximo: row.presupuesto_maximo,
-  moneda: row.moneda ?? 'USD',
-  fecha_inicio: row.fecha_inicio ?? null,
-  fecha_fin: row.fecha_fin ?? null,
-  copy: row.copy ?? null,
-  titulo: row.titulo ?? null,
-  cta: row.cta ?? null,
-  creative_url: row.creative_url ?? null,
-  meta_campaign_id: row.meta_campaign_id ?? null,
-  created_at: row.created_at,
-  updated_at: row.updated_at,
+  creado_en: row.creado_en,
+  actualizado_en: row.actualizado_en,
 }));
 
-export const aprobacionResource = new BaseResource<any, Record<string, unknown>>((row) => ({
-  approval_id: row.approval_id,
-  campaign_id: row.campaign_id,
-  organization_id: row.organization_id,
-  aprobado_por: row.aprobado_por,
-  decision: row.decision,
-  comentario: row.comentario ?? null,
-  created_at: row.created_at,
-}));
-
-export const insightResource = new BaseResource<any, Record<string, unknown>>((row) => ({
-  snapshot_id: row.snapshot_id,
-  campaign_id: row.campaign_id,
-  organization_id: row.organization_id,
-  gasto: row.gasto ?? 0,
-  impresiones: row.impresiones ?? 0,
-  clics: row.clics ?? 0,
-  leads: row.leads ?? 0,
-  alcance: row.alcance ?? null,
-  tomado_en: row.tomado_en,
+export const campaniaPublicitariaResource = new BaseResource<any, CampaniaPublicitariaView>((row) => ({
+  campania_publicitaria_id: row.campania_publicitaria_id,
+  propiedad_id: row.propiedad_id,
+  objetivo_publicidad_id: row.objetivo_publicidad_id,
+  presupuesto_diario: row.presupuesto_diario,
+  duracion_dias: row.duracion_dias,
+  zona_referencia: row.zona_referencia,
+  copy_anuncio: row.copy_anuncio,
+  estado: row.estado,
+  creado_en: row.creado_en,
+  actualizado_en: row.actualizado_en,
+  // Subobjetos FK (las tablas incrustadas llegan en plural).
+  propiedad: row.propiedades ? propiedadResource.format(row.propiedades) : null,
+  objetivo_publicidad: row.objetivo_publicidad
+    ? objetivoPublicidadResource.format(row.objetivo_publicidad)
+    : null,
 }));
