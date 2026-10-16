@@ -9,3 +9,4 @@ export * from './base.resource';
 export * from './base.service';
 export * from './base.controller';
 export * from './crud.factory';
+export * from './base.model';
