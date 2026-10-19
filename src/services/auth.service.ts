@@ -11,7 +11,7 @@
 //
 // El acceso posterior resuelve empresa y rol en `middlewares/sessionAuth`.
 
-import supabase from '../config/supabaseClient';
+import supabase, { supabaseAuthSession } from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { Usuario } from '../models/identity/usuario.model';
 import { logAudit } from './audit.service';
@@ -138,7 +138,8 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
 }
 
 export async function login(email: string, password: string): Promise<SessionResult> {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  // Cliente aislado: ver config/supabaseClient.ts (no contaminar el service client).
+  const { data, error } = await supabaseAuthSession.auth.signInWithPassword({ email, password });
 
   if (error || !data.session) {
     // Los intentos fallidos NO se registran en la bitácora: el email podría

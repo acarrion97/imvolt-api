@@ -68,6 +68,13 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 | Módulo | Rutas | Contenido |
 |--------|-------|-----------|
 | Auth | `/api/auth` | register (cuenta + empresa + usuario + rol propietario), login, me |
+
+> `POST /api/auth/login` usa un **cliente Supabase aislado**
+> (`supabaseAuthSession` en `src/config/supabaseClient.ts`): `signInWithPassword`
+> deja la sesión del usuario en la memoria del cliente y supabase-js enviaría
+> ese JWT en cada consulta PostgREST, ejecutándolas con el rol `authenticated`
+> (que `schema.sql` revoca) y respondiendo `permission denied`. El cliente
+> principal nunca tiene sesión y sigue viajando siempre con la service role key.
 | Identity | `/api/v1/empresas`, `/usuarios`, `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones`, `/auditoria` | Tenant, usuarios, RBAC y bitácora (10 recursos CRUD + auditoría de solo lectura) |
 | Property | `/api/v1/propiedades`, `/tipos-propiedad` | Catálogo de inmuebles |
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
