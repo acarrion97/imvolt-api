@@ -8,8 +8,13 @@
 -- campaigns, insights, leads, planes, suscripciones y wallets de créditos.
 --
 -- Relación con el código:
---   • Las 20 tablas con CRUD expuesto en /api/v1 tienen su modelo en
+--   • Las 22 tablas con CRUD expuesto en /api/v1 tienen su modelo en
 --     src/models/*.model.ts, su Request/Resource y su documentación OpenAPI.
+--   • `brand_assets` / `brand_asset_versions` / `brand_colors` (Brand Kit)
+--     guardan solo METADATOS: los blobs viven en el bucket privado
+--     `brand-kit` de Supabase Storage (10 MB máximo + catálogo de MIME
+--     types), que este archivo crea y `services/brandkit.storage.ts` vigila
+--     al arrancar.
 --   • `integraciones` es una tabla de apoyo del diagrama (catálogo de
 --     proveedores disponibles) y NO tiene CRUD: se alimenta con esta semilla.
 --   • `audit_logs` es la bitácora de escrituras: solo lectura desde el API
@@ -257,6 +262,97 @@ create table if not exists public.contactos (
     actualizado_en timestamptz not null default now()
 );
 
+-- ── BRAND KIT (identidad de marca) ───────────────────────────────────────────
+-- Archivos de marca y colores de la paleta de la empresa.
+--
+-- Un ARCHIVO es solo metadatos: su blob vive en el bucket privado `brand-kit`
+-- de Supabase Storage (10 MB máximo, catálogo de MIME types) y se sirve
+-- siempre con URL firmada de 5 minutos (`src/services/brandkit.storage.ts`).
+-- `brand_asset_versions` guarda el historial; `version_activa_id` apunta a la
+-- versión que se previsualiza y se descarga.
+
+create table if not exists public.brand_assets (
+    brand_asset_id    bigserial primary key,
+    nombre            varchar(80) not null,
+    -- Categoría: define qué tipos de archivo se aceptan al subir.
+    categoria         varchar(30) not null default 'logo',
+    descripcion       text,
+    -- FK hacia abajo: la tabla hija todavía no existe al crear la madre, por
+    -- eso se declara al final con su nombre (`fk_brand_asset_version_activa`).
+    version_activa_id bigint,
+    empresa_id        bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado            varchar(20) not null default 'activo',
+    creado_en         timestamptz not null default now(),
+    actualizado_en    timestamptz not null default now()
+);
+
+create table if not exists public.brand_asset_versions (
+    brand_asset_version_id bigserial primary key,
+    brand_asset_id         bigint not null references public.brand_assets (brand_asset_id) on delete cascade,
+    -- Número correlativo dentro del archivo (1 = v1, 2 = v2…).
+    numero                 integer not null,
+    nombre_archivo         varchar(200) not null,
+    -- Ruta DENTRO del bucket privado; nunca se expone al cliente como tal.
+    ruta_storage           varchar(300) not null,
+    mime_type              varchar(100),
+    tamano_bytes           bigint,
+    nota                   text,
+    subido_por             bigint references public.usuarios (usuario_id) on delete set null,
+    empresa_id             bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado                 varchar(20) not null default 'activo',
+    creado_en              timestamptz not null default now(),
+    actualizado_en         timestamptz not null default now()
+);
+
+-- Relación inversa (archivo → versión activa). El nombre del constraint es el
+-- que PostgREST usa para desambiguar: hay DOS llaves entre ambas tablas y el
+-- API incrusta `brand_asset_versions!fk_brand_asset_version_activa`.
+-- Se declara después porque `brand_asset_versions` aún no existía al crear la
+-- tabla madre (Postgres no admite `add constraint if not exists`).
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'fk_brand_asset_version_activa'
+          and conrelid = 'public.brand_assets'::regclass
+    ) then
+        alter table public.brand_assets
+            add constraint fk_brand_asset_version_activa
+            foreign key (version_activa_id)
+            references public.brand_asset_versions (brand_asset_version_id)
+            on delete set null;
+    end if;
+end $$;
+
+create table if not exists public.brand_colors (
+    brand_color_id bigserial primary key,
+    nombre         varchar(50) not null,
+    -- #RRGGBB
+    hex            varchar(7) not null,
+    uso            varchar(30) not null default 'principal',
+    orden          integer not null default 0,
+    empresa_id     bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado         varchar(20) not null default 'activo',
+    creado_en      timestamptz not null default now(),
+    actualizado_en timestamptz not null default now()
+);
+
+-- Bucket privado de Supabase Storage: sin acceso público, con el mismo límite
+-- de 10 MB y catálogo de tipos que valida el API antes de subir.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+    'brand-kit',
+    'brand-kit',
+    false,
+    10485760,
+    array[
+        'image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'application/pdf',
+        'font/woff', 'font/woff2', 'font/ttf', 'font/otf', 'application/font-woff'
+    ]
+)
+on conflict (id) do nothing;
+
 -- ── AUDITORÍA ───────────────────────────────────────────────────────────────
 -- Trazas de las escrituras del API (CREATE / UPDATE / DELETE y eventos de
 -- cuenta). Es una bitácora de SÓLO LECTURA desde el API: no tiene CRUD de
@@ -298,6 +394,12 @@ create index if not exists idx_campanias_propiedad     on public.campanias_publi
 create index if not exists idx_campanias_objetivo      on public.campanias_publicitarias (objetivo_publicidad_id);
 create index if not exists idx_contactos_propiedad     on public.contactos (propiedad_id);
 create index if not exists idx_contactos_origen        on public.contactos (origen);
+create index if not exists idx_brand_assets_empresa   on public.brand_assets (empresa_id);
+create index if not exists idx_brand_assets_estado    on public.brand_assets (estado);
+create index if not exists idx_brand_versions_asset   on public.brand_asset_versions (brand_asset_id);
+create index if not exists idx_brand_versions_numero  on public.brand_asset_versions (brand_asset_id, numero desc);
+create index if not exists idx_brand_colors_empresa   on public.brand_colors (empresa_id);
+create index if not exists idx_brand_colors_orden     on public.brand_colors (empresa_id, orden);
 create index if not exists idx_audit_empresa           on public.audit_logs (empresa_id);
 create index if not exists idx_audit_usuario           on public.audit_logs (usuario_id);
 create index if not exists idx_audit_tabla             on public.audit_logs (tabla, accion);
@@ -317,7 +419,8 @@ begin
         'configuraciones_integraciones', 'integraciones', 'empresas_integraciones',
         'tipos_propiedades', 'propiedades', 'tipos_plantillas', 'plantillas',
         'formatos', 'enfoques_comerciales', 'contenidos_ia',
-        'objetivo_publicidad', 'campanias_publicitarias', 'contactos', 'audit_logs'
+        'objetivo_publicidad', 'campanias_publicitarias', 'contactos',
+        'brand_assets', 'brand_asset_versions', 'brand_colors', 'audit_logs'
     ]
     loop
         execute format('alter table public.%I enable row level security', tabla);

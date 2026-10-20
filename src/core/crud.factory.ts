@@ -75,6 +75,11 @@ export interface CrudRouterConfig<T> {
    * existencia). Debe usarse junto a `orgContext` y `defaultGetAllOptions`.
    */
   tenantScoped?: boolean;
+  /**
+   * Columna que identifica el tenant en la tabla (por defecto `organization_id`).
+   * Las tablas del diagrama usan `empresa_id`.
+   */
+  tenantColumn?: string;
 }
 
 export interface CrudRouterResult<T> {
@@ -129,6 +134,8 @@ export function createCrudRouter<T = any>(config: CrudRouterConfig<T>): CrudRout
   // Verifica que el registro pertenezca a la organización activa antes de
   // leerlo, editarlo o eliminarlo (multi-tenant). Si no existe o es de otra
   // organización responde 404, sin filtrar su existencia.
+  const tenantColumn = config.tenantColumn ?? 'organization_id';
+
   const tenantGuard: RequestHandler = async (req: Request, res: Response, next) => {
     if (!config.tenantScoped || !req.organizationId) {
       next();
@@ -136,7 +143,7 @@ export function createCrudRouter<T = any>(config: CrudRouterConfig<T>): CrudRout
     }
     try {
       const row = (await service.getById(req.params.id)) as Record<string, unknown>;
-      if (row.organization_id && String(row.organization_id) !== req.organizationId) {
+      if (row[tenantColumn] && String(row[tenantColumn]) !== req.organizationId) {
         res.status(404).json({ message: `Registro no encontrado` });
         return;
       }

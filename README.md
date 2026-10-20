@@ -80,10 +80,11 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
 | Advertising | `/api/v1/objetivos-publicidad`, `/campanias-publicitarias` | Campañas publicitarias |
 | Leads | `/api/v1/contactos` | Prospectos captados |
+| Brand Kit | `/api/v1/brand-assets`, `/api/v1/brand-colors` | Identidad de marca: archivos con versiones en bucket privado y colores de la paleta |
 
 Cada módulo CRUD expone `GET /`, `GET /:id`, `POST /`, `PUT /:id`, `PATCH /:id`
 y `DELETE /:id`, con filtros por querystring (`?campo=valor&limite=20&pagina=1`).
-Los 20 recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
+Los 22 recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
 tablas del diagrama relacional (`database/schema.sql`).
 
 ### Respuestas con subobjetos de llaves foráneas
@@ -118,8 +119,40 @@ Cómo funciona:
   de dominio (`UsuarioView`, `PropiedadView`, `ContenidoIaView`, …) que describe
   la forma exacta de la respuesta, con los campos relacionados.
 
-> El módulo `catálogo` (proyectos / media / brand kits del documento maestro)
-> fue retirado del API: solo existía como referencia del patrón CRUD.
+> El módulo `catálogo` (proyectos / media del documento maestro) fue retirado
+> del API: solo existía como referencia del patrón CRUD. El **Brand Kit** sí
+> está implementado (ver abajo).
+
+### Brand Kit — archivos con storage y URL firmada
+
+`/api/v1/brand-assets` es un CRUD de metadatos con rutas propias de storage y
+`/api/v1/brand-colors` gestiona la paleta de la empresa:
+
+| Ruta | Qué hace |
+|------|----------|
+| `POST /brand-assets/:id/versiones` | `multipart/form-data` con el campo `archivo` (+ `nota`): sube una versión y la deja activa |
+| `GET /brand-assets/:id/versiones` | Historial de versiones (más reciente primero) |
+| `GET /brand-assets/:id/descarga` | URL firmada de la versión activa (5 minutos) |
+| `GET /brand-assets/:id/versiones/:vid/descarga` | URL firmada de una versión puntual |
+| `POST /brand-assets/:id/versiones/:vid/restaurar` | Devuelve el archivo a esa versión |
+| `DELETE /brand-assets/:id/versiones/:vid` | Borra fila + blob; si era la activa, activa la más reciente restante |
+| `DELETE /brand-assets/:id` | Borra los blobs, el historial y el archivo |
+
+- **Bucket privado** `brand-kit` (`src/services/brandkit.storage.ts`): la API lo
+  crea o ajusta al arrancar (`asegurarBucket`) con `file_size_limit` de **10 MB**
+  y `allowed_mime_types` del catálogo.
+- **Límites y tipos**: `validarArchivo` responde `413` (supera 10 MB), `400`
+  (archivo vacío) y `415` (tipo no permitido para la categoría). Si el navegador
+  no reporta el MIME (fuentes `.woff2`/`.otf`) se deduce de la extensión.
+  El frontend repite exactamente la misma validación en
+  `imvolt/src/domain/brand-kit` solo para anticipar el error.
+- **URL firmada**: el bucket jamás es público; toda lectura pasa por
+  `GET .../descarga`, que valida sesión + tenant y devuelve una URL de 300 s
+  (`BrandAssetDescarga`). La ruta interna (`ruta_storage`) no sale del API.
+- **Multiempresa**: `empresa_id` se fuerza desde la sesión en lecturas
+  (`filterByEmpresa`) y escrituras (`empresaEnEscritura`), con
+  `tenantScoped/tenantColumn` para responder 404 ante registros ajenos.
+- **Auditoría**: subidas, restauraciones y borrados dejan traza en `audit_logs`.
 
 ### Flujo de generación IA (§09) — adaptadores listos, endpoints pendientes
 
@@ -172,9 +205,9 @@ cp .env.example .env      # en Windows: copy .env.example .env
 npm install
 
 # 1. Ejecuta database/schema.sql en el SQL Editor de Supabase
-#    (21 tablas del diagrama + RLS denegado por defecto + semillas de roles,
-#    permisos, tipos de propiedad, plantillas, formatos, enfoques, objetivos,
-#    hitos e integraciones)
+#    (25 tablas del diagrama + bucket privado `brand-kit` + RLS denegado por
+#    defecto + semillas de roles, permisos, tipos de propiedad, plantillas,
+#    formatos, enfoques, objetivos, hitos e integraciones)
 # 2. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env
 
 npm run dev               # desarrollo (ts-node)
@@ -206,12 +239,14 @@ src/
 │   ├── advertising/  campania_publicitaria(+View), objetivo_publicidad,
 │   │                 meta (adaptador Meta)
 │   ├── leads/        contacto(+View)
+│   ├── brandkit/     brand_asset(+View), brand_asset_version, brand_color(+View)
 │   └── commerce/     credits (créditos, deshabilitado)
 ├── requests/        Validaciones Joi por dominio (helpers + dominio.*)
 ├── resources/       Vistas de respuesta por dominio
 ├── controllers/     Un controlador por módulo (createCrudRouter)
-├── routes/          Exposición de routers (+ Swagger de auth)
-├── services/        auth, higgsfield, meta, credits, strategist
+├── routes/          Exposición de routers (+ Swagger de auth y Brand Kit)
+├── services/        auth, higgsfield, meta, credits, strategist,
+│                    brandkit.storage (bucket privado + URL firmada)
 ├── types/           Extensiones de Express (userId, organizationId, orgRole)
 └── index.ts         Registro de rutas + fusión de la spec OpenAPI
 database/
@@ -222,7 +257,8 @@ database/
 
 `/documentacion` combina dos fuentes:
 
-1. **Comentarios `@swagger`** en `src/routes/auth.route.ts` (endpoints de negocio).
+1. **Comentarios `@swagger`** en `src/routes/auth.route.ts` y
+   `src/routes/brandkit.route.ts` (endpoints de negocio).
 2. **Spec generada** en `src/docs/`: `schemas.ts` declara cada entidad una vez
    (modelo + ejemplo realista) y `crud-paths.ts` genera las 6 operaciones de
    cada recurso con parámetros, `$ref`, ejemplos y respuestas de error

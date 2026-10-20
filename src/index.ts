@@ -14,6 +14,8 @@
 //                 /contenidos-ia
 //   advertising   /objetivos-publicidad /campanias-publicitarias
 //   leads         /contactos
+//   brandkit      /brand-assets (CRUD + versiones multipart y URL firmada)
+//                 /brand-colors
 
 import express from 'express';
 import cors from 'cors';
@@ -46,6 +48,8 @@ import {
 } from './routes/creative.route';
 import { campaniaPublicitariaRouter, objetivoPublicidadRouter } from './routes/advertising.route';
 import { contactoRouter } from './routes/leads.route';
+import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
+import { asegurarBucket } from './services/brandkit.storage';
 import { openapiComponents, openapiCrudPaths, openapiTags } from './docs';
 
 dotenv.config();
@@ -103,6 +107,10 @@ app.use('/api/v1/campanias-publicitarias', campaniaPublicitariaRouter);
 
 // leads
 app.use('/api/v1/contactos', contactoRouter);
+
+// brand kit (identidad de marca: archivos en bucket privado + colores)
+app.use('/api/v1/brand-assets', brandAssetRouter);
+app.use('/api/v1/brand-colors', brandColorRouter);
 
 // ── Documentación Swagger ───────────────────────────────────────────────────
 // Combina las rutas comentadas con @swagger (auth) con las rutas CRUD
@@ -170,6 +178,8 @@ app.listen(config.port, () => {
   console.log(`Documentación: http://localhost:${config.port}/documentacion`);
   if (config.higgsfield.simulate) console.log('Higgsfield: MODO SIMULADO (sin API key)');
   if (config.meta.simulate) console.log('Meta: MODO SIMULADO (sin credenciales; solo borradores)');
+  // Bucket privado del Brand Kit: lo crea/ajusta (10 MB + MIME) sin bloquear el arranque.
+  void asegurarBucket();
 });
 
 export default app;

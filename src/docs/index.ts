@@ -246,6 +246,41 @@ export const crudModules: CrudDocConfig[] = [
     ],
   },
 
+  // ── Brand Kit ────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/brand-assets',
+    tag: 'Brand Kit',
+    schema: 'BrandAsset',
+    entity: 'Archivo de marca',
+    female: true,
+    idExample: 1,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      {
+        name: 'categoria',
+        description: 'Filtra por categoría del archivo',
+        type: 'string',
+        enum: ['logo_horizontal', 'logo_isotipo', 'tipografia', 'imagen_referencia', 'plantilla_documento', 'otro'],
+      },
+    ],
+  },
+  {
+    path: '/api/v1/brand-colors',
+    tag: 'Brand Kit',
+    schema: 'BrandColor',
+    entity: 'Color de marca',
+    idExample: 1,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      {
+        name: 'uso',
+        description: 'Filtra por rol del color',
+        type: 'string',
+        enum: ['principal', 'secundario', 'acento', 'fondo', 'texto'],
+      },
+    ],
+  },
+
   // ── Auditoría ────────────────────────────────────────────────────────────
   {
     path: '/api/v1/auditoria',

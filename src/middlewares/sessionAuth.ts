@@ -3,7 +3,8 @@
 // (multi-tenant) sobre el diagrama relacional.
 //
 //   Authorization: Bearer <access_token>
-//   X-Empresa-Id: <empresa_id>   (opcional; si falta se usa la del usuario)
+//   X-Empresa-Id: <empresa_id>   (opcional; solo puede confirmar la empresa
+//                                 propia: cualquier otro valor responde 403)
 //
 // `sessionAuth` comprueba el token con Supabase Auth. `orgContext` traduce ese
 // usuario a la fila local `usuarios` (por email) y resuelve:
@@ -81,13 +82,23 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    const empresaSolicitada = (req.headers['x-empresa-id'] as string | undefined)?.trim();
-    const empresaId = empresaSolicitada || (local.empresa_id != null ? String(local.empresa_id) : '');
-
-    if (!empresaId) {
+    // RF-01 / P0: `usuarios.empresa_id` es único en el diagrama (no existe
+    // membresía múltiple), así que el header solo puede CONFIRMAR la empresa
+    // propia. Cualquier otro valor (o un usuario sin empresa) responde 403: sin
+    // esta comprobación, `X-Empresa-Id` dejaría leer y escribir los registros
+    // de otra compañía.
+    if (local.empresa_id == null) {
       res.status(403).json({ message: 'El usuario no tiene una empresa asignada' });
       return;
     }
+
+    const empresaSolicitada = (req.headers['x-empresa-id'] as string | undefined)?.trim();
+    if (empresaSolicitada && Number(empresaSolicitada) !== Number(local.empresa_id)) {
+      res.status(403).json({ message: 'El usuario no pertenece a la empresa indicada en X-Empresa-Id' });
+      return;
+    }
+
+    const empresaId = String(local.empresa_id);
 
     const { data: asignaciones, error: rolesError } = await supabase
       .from('roles_usuarios')

@@ -354,6 +354,63 @@ const definitions: EntityDef[] = [
     // Solo lectura: la bitácora la escribe el núcleo; no existe payload de entrada.
     soloLectura: true,
   },
+
+  // ── Brand Kit (identidad de marca) ──────────────────────────────────────
+  {
+    name: 'BrandAsset',
+    pk: 'brand_asset_id',
+    pkExample: 1,
+    properties: {
+      nombre: { type: 'string', maxLength: 80, example: 'Logo horizontal principal', description: 'Nombre visible del archivo' },
+      categoria: {
+        type: 'string',
+        enum: ['logo_horizontal', 'logo_isotipo', 'tipografia', 'imagen_referencia', 'plantilla_documento', 'otro'],
+        example: 'logo_horizontal',
+        description: 'Categoría: define qué tipos de archivo se aceptan al subir una versión',
+      },
+      descripcion: { type: 'string', maxLength: 500, nullable: true, example: 'Logo oficial para cabeceras y presentaciones', description: 'Para qué sirve este archivo en las piezas' },
+      version_activa_id: { type: 'integer', nullable: true, description: 'FK → BrandAssetVersion (versión que se sirve al previsualizar y descargar)', example: 3 },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['nombre', 'categoria'],
+    example: { brand_asset_id: 1, nombre: 'Logo horizontal principal', categoria: 'logo_horizontal', descripcion: 'Logo oficial para cabeceras y presentaciones', version_activa_id: 3, empresa_id: 1, estado: 'activo', creado_en: '2026-03-04T15:30:00.000Z', actualizado_en: '2026-03-04T16:10:00.000Z' },
+    relations: { empresa: 'Empresa', version_activa: 'BrandAssetVersion' },
+  },
+  {
+    // Las versiones no se crean por JSON: llegan en multipart a
+    // `POST /brand-assets/{id}/versiones`. Solo se documenta la respuesta.
+    name: 'BrandAssetVersion',
+    pk: 'brand_asset_version_id',
+    pkExample: 3,
+    properties: {
+      brand_asset_id: ref('BrandAsset'),
+      numero: { type: 'integer', example: 3, description: 'Número correlativo de la versión (1 = v1)' },
+      nombre_archivo: { type: 'string', maxLength: 200, example: 'logo-horizontal-v3.png', description: 'Nombre saneado del archivo dentro del bucket' },
+      mime_type: { type: 'string', maxLength: 100, nullable: true, example: 'image/png', description: 'Tipo real detectado y validado contra la categoría' },
+      tamano_bytes: { type: 'integer', nullable: true, example: 48213, description: 'Tamaño del blob (máximo 10 MB)' },
+      nota: { type: 'string', maxLength: 500, nullable: true, example: 'Ajuste del isotipo para fondos oscuros.', description: 'Qué cambió en esta versión' },
+      subido_por: { type: 'integer', nullable: true, description: 'FK → Usuario (quien subió la versión)', example: 7 },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['brand_asset_id', 'numero', 'nombre_archivo'],
+    example: { brand_asset_version_id: 3, brand_asset_id: 1, numero: 3, nombre_archivo: 'logo-horizontal-v3.png', mime_type: 'image/png', tamano_bytes: 48213, nota: 'Ajuste del isotipo para fondos oscuros.', subido_por: 7, empresa_id: 1, estado: 'activo', creado_en: '2026-03-04T16:10:00.000Z', actualizado_en: '2026-03-04T16:10:00.000Z' },
+    soloLectura: true,
+  },
+  {
+    name: 'BrandColor',
+    pk: 'brand_color_id',
+    pkExample: 1,
+    properties: {
+      nombre: { type: 'string', maxLength: 50, example: 'Verde IMVOLT', description: 'Nombre del color en la paleta' },
+      hex: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', example: '#008E47', description: 'Código hexadecimal (#RRGGBB)' },
+      uso: { type: 'string', enum: ['principal', 'secundario', 'acento', 'fondo', 'texto'], default: 'principal', example: 'principal', description: 'Rol del color dentro de la identidad' },
+      orden: { type: 'integer', default: 0, example: 0, description: 'Posición en la paleta' },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['nombre', 'hex'],
+    example: { brand_color_id: 1, nombre: 'Verde IMVOLT', hex: '#008E47', uso: 'principal', orden: 0, empresa_id: 1, estado: 'activo', creado_en: '2026-03-04T15:30:00.000Z', actualizado_en: '2026-03-04T15:30:00.000Z' },
+    relations: { empresa: 'Empresa' },
+  },
 ];
 
 /** Construye el par de esquemas (completo + input) de una entidad. */

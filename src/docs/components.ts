@@ -15,6 +15,7 @@ export const openapiTags = [
   { name: 'Publicidad', description: 'Objetivos y campañas publicitarias de IMVOLT Ads (RF-07 / RF-08)' },
   { name: 'Leads', description: 'Contactos captados por campañas, formularios o registro manual (RF-10)' },
   { name: 'Auditoría', description: 'Bitácora de solo lectura: quién hizo qué, sobre qué tabla y dentro de qué empresa (RF-09)' },
+  { name: 'Brand Kit', description: 'Archivos de marca y colores de la paleta: versiones en bucket privado y descargas con URL firmada' },
 ];
 
 export const securitySchemes = {
@@ -83,6 +84,33 @@ export const openapiSchemas = {
     description: 'Confirmación simple de una operación',
     properties: { message: { type: 'string' } },
     example: { message: 'Registro eliminado correctamente' },
+  },
+  BrandAssetDescarga: {
+    type: 'object',
+    description:
+      'Descarga autorizada de un blob del bucket privado `brand-kit`: la API valida sesión y tenant y devuelve una URL firmada de corta duración.',
+    properties: {
+      url: {
+        type: 'string',
+        format: 'uri',
+        description: 'URL firmada; caduca a los `expira_en_segundos`.',
+        example: 'https://<proyecto>.supabase.co/storage/v1/object/sign/brand-kit/empresa_1/1/v3-logo.png?token=eyJhbGciOi...',
+      },
+      expira_en_segundos: { type: 'integer', example: 300, description: 'Vigencia de la URL (5 minutos)' },
+      nombre_archivo: { type: 'string', example: 'logo-horizontal-v3.png', description: 'Nombre sugerido para la descarga' },
+      mime_type: { type: 'string', nullable: true, example: 'image/png' },
+      tamano_bytes: { type: 'integer', nullable: true, example: 48213 },
+      numero: { type: 'integer', example: 3, description: 'Versión que se está sirviendo' },
+    },
+    required: ['url', 'expira_en_segundos', 'nombre_archivo', 'numero'],
+    example: {
+      url: 'https://<proyecto>.supabase.co/storage/v1/object/sign/brand-kit/empresa_1/1/v3-logo.png?token=eyJhbGciOi...',
+      expira_en_segundos: 300,
+      nombre_archivo: 'logo-horizontal-v3.png',
+      mime_type: 'image/png',
+      tamano_bytes: 48213,
+      numero: 3,
+    },
   },
 };
 
