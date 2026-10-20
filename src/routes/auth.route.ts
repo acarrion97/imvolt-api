@@ -133,10 +133,12 @@ router.post('/login', AuthController.login);
  * @swagger
  * /api/auth/me:
  *   get:
- *     summary: Perfil local del usuario autenticado y sus roles
+ *     summary: Perfil local del usuario autenticado, sus roles y permisos
  *     description: >
  *       Resuelve el usuario local (tabla `usuarios`) a partir del token y
- *       devuelve su empresa activa más los roles asignados en `roles_usuarios`.
+ *       devuelve su empresa activa, los roles asignados en `roles_usuarios` y
+ *       la unión de permisos de esos roles (`roles_permisos`), que el frontend
+ *       usa para habilitar o no las acciones de gestión.
  *     tags: [Autenticación]
  *     parameters:
  *       - in: header
@@ -151,7 +153,7 @@ router.post('/login', AuthController.login);
  *         description: Empresa a la que se quiere acceder (por defecto, la del usuario)
  *     responses:
  *       200:
- *         description: Usuario, empresa y roles
+ *         description: Usuario, empresa, roles y permisos
  *         content:
  *           application/json:
  *             schema:
@@ -167,6 +169,10 @@ router.post('/login', AuthController.login);
  *                       usuario_rol_id: { type: integer, example: 3 }
  *                       rol_id: { type: integer, example: 2 }
  *                       nombre: { type: string, example: marketing }
+ *                 permisos:
+ *                   type: array
+ *                   description: Unión de permisos activos del usuario (el propietario los hereda todos)
+ *                   items: { type: string, example: gestionar_usuarios }
  *       401:
  *         description: Sin token válido
  *       404:

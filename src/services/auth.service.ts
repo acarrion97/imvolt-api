@@ -14,6 +14,7 @@
 import supabase, { supabaseAuthSession } from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { Usuario } from '../models/identity/usuario.model';
+import { ORG_PERMISSIONS } from '../middlewares/requireRole';
 import { logAudit } from './audit.service';
 
 export interface RegisterInput {
@@ -167,10 +168,12 @@ export async function login(email: string, password: string): Promise<SessionRes
   };
 }
 
-/** Perfil local del usuario + roles asignados dentro de su empresa. */
+/** Perfil local del usuario + roles y permisos asignados dentro de su empresa. */
 export async function me(email: string | undefined): Promise<{
   usuario: (Usuario & { empresa: { empresa_id: number; razon_social: string } | null }) | null;
   roles: Array<{ usuario_rol_id: number; rol_id: number; nombre: string }>;
+  /** Unión de permisos activos de todos sus roles (RBAC fino, §13). */
+  permisos: string[];
 }> {
   if (!email) {
     throw new HttpError(401, 'El token no incluye un correo de acceso');
@@ -189,24 +192,43 @@ export async function me(email: string | undefined): Promise<{
 
   const { data: asignaciones } = await supabase
     .from('roles_usuarios')
-    .select('usuario_rol_id, rol_id, estado, roles(nombre)')
+    .select('usuario_rol_id, rol_id, estado, roles(nombre, estado, roles_permisos(permisos(nombre, estado)))')
     .eq('usuario_id', fila.usuario_id)
     .eq('estado', 'activo');
 
-  const roles = (asignaciones ?? []).map((asignacion) => {
-    const rol = asignacion.roles as unknown as { nombre: string } | null;
+  const rolesActivos = (asignaciones ?? []).map((asignacion) => {
+    const rol = asignacion.roles as unknown as {
+      nombre: string;
+      estado?: string;
+      roles_permisos?: Array<{ permisos?: { nombre?: string; estado?: string } | null }>;
+    } | null;
     return {
       usuario_rol_id: asignacion.usuario_rol_id,
       rol_id: asignacion.rol_id,
       nombre: rol?.nombre ?? 'sin-rol',
+      activo: rol?.estado !== 'inactivo',
+      permisos: (rol?.roles_permisos ?? [])
+        .map((vinculo) => vinculo.permisos)
+        .filter((permiso) => permiso?.nombre && permiso.estado !== 'inactivo')
+        .map((permiso) => permiso!.nombre as string),
     };
   });
+
+  const roles = rolesActivos.map(({ usuario_rol_id, rol_id, nombre }) => ({ usuario_rol_id, rol_id, nombre }));
+
+  // El propietario es superusuario: hereda todos los permisos del catálogo
+  // aunque `roles_permisos` esté vacío (mismo criterio que `requirePermission`).
+  const esPropietario = rolesActivos.some((rol) => rol.activo && rol.nombre === 'propietario');
+  const permisos = esPropietario
+    ? [...ORG_PERMISSIONS]
+    : [...new Set(rolesActivos.filter((rol) => rol.activo).flatMap((rol) => rol.permisos))].sort();
 
   const { empresas, ...resto } = fila;
 
   return {
     usuario: { ...resto, empresa: empresas ?? null },
     roles,
+    permisos,
   };
 }
 

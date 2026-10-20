@@ -40,7 +40,19 @@ export const usuarioResource = new BaseResource<any, UsuarioView>((row) => ({
   actualizado_en: row.actualizado_en,
   // Subobjeto FK: la tabla incrustada llega como `empresas`.
   empresa: row.empresas ? empresaResource.format(row.empresas) : null,
+  // Membresía: nombres de los roles activos del miembro (si el listado los
+  // incrusta vía `roles_usuarios → roles`); vacío si no vienen resueltos.
+  roles: rolesActivosDe(row),
 }));
+
+/** Nombres de los roles activos incrustados en un usuario (`roles_usuarios`). */
+function rolesActivosDe(row: any): string[] {
+  const vinculos = Array.isArray(row?.roles_usuarios) ? row.roles_usuarios : [];
+  return vinculos
+    .filter((vinculo: any) => vinculo?.estado !== 'inactivo')
+    .map((vinculo: any) => vinculo?.roles?.nombre)
+    .filter((nombre: unknown): nombre is string => typeof nombre === 'string');
+}
 
 export const rolResource = new BaseResource<any, Rol>((row) => ({
   rol_id: row.rol_id,

@@ -12,7 +12,7 @@
 
 import supabase from '../config/supabaseClient';
 
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'REGISTER' | 'LOGIN';
+export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'REGISTER' | 'LOGIN' | 'INVITE';
 
 /** Contexto del autor de la acción (resuelto por los middlewares de sesión). */
 export interface AuditContext {

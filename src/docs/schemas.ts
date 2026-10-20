@@ -31,6 +31,12 @@ interface EntityDef {
    */
   relations?: Record<string, string>;
   /**
+   * Campos CALCULADOS que solo aparecen en la respuesta (no se envían al
+   * crear ni al actualizar). Ej.: `roles` de un usuario, resuelto por la API
+   * desde `roles_usuarios`.
+   */
+  computados?: Prop;
+  /**
    * Entidad de SOLO LECTURA (p. ej. la bitácora `audit_logs`, que escribe el
    * núcleo y no expone POST/PUT/DELETE): no se genera el esquema `XxxInput`,
    * porque ningún endpoint acepta ese payload.
@@ -85,10 +91,13 @@ const definitions: EntityDef[] = [
       telefono: { type: 'string', maxLength: 20, nullable: true, example: '+593987654321', description: 'Teléfono / WhatsApp' },
       empresa_id: ref('Empresa'),
       contrasenia_temporal_hasta: { type: 'string', format: 'date-time', nullable: true, example: '2026-03-11T00:00:00.000Z', description: 'Vigencia de la contraseña temporal' },
+      estado: { type: 'string', enum: ['activo', 'inactivo'], default: 'activo', example: 'activo', description: 'Baja lógica del miembro: `inactivo` revoca el acceso (la sesión responde 403)' },
     },
     required: ['nombre', 'email', 'empresa_id'],
-    example: { usuario_id: 7, nombre: 'Andrea Salazar', email: 'andrea.salazar@imvolt.ec', telefono: '+593987654321', empresa_id: 1, contrasenia_temporal_hasta: null, estado: 'activo', creado_en: '2026-02-02T16:20:00.000Z', actualizado_en: '2026-03-01T09:10:00.000Z' },
+    example: { usuario_id: 7, nombre: 'Andrea Salazar', email: 'andrea.salazar@imvolt.ec', telefono: '+593987654321', empresa_id: 1, contrasenia_temporal_hasta: null, roles: ['marketing'], estado: 'activo', creado_en: '2026-02-02T16:20:00.000Z', actualizado_en: '2026-03-01T09:10:00.000Z' },
     relations: { empresa: 'Empresa' },
+    // Membresía resuelta por la API desde `roles_usuarios → roles` (solo lectura).
+    computados: { roles: { type: 'array', items: { type: 'string' }, readOnly: true, example: ['marketing'], description: 'Nombres de los roles activos del miembro (catálogo §13)' } },
   },
   {
     name: 'Rol',
@@ -110,7 +119,11 @@ const definitions: EntityDef[] = [
     name: 'UsuarioRol',
     pk: 'usuario_rol_id',
     pkExample: 3,
-    properties: { usuario_id: ref('Usuario'), rol_id: ref('Rol') },
+    properties: {
+      usuario_id: ref('Usuario'),
+      rol_id: ref('Rol'),
+      estado: { type: 'string', enum: ['activo', 'inactivo'], default: 'activo', example: 'activo', description: 'Revocación lógica del rol: `inactivo` deja el vínculo sin efecto sin borrarlo' },
+    },
     required: ['usuario_id', 'rol_id'],
     example: { usuario_rol_id: 3, usuario_id: 7, rol_id: 2, estado: 'activo', creado_en: '2026-02-02T16:21:00.000Z', actualizado_en: '2026-02-02T16:21:00.000Z' },
     relations: { usuario: 'Usuario', rol: 'Rol' },
@@ -340,7 +353,7 @@ const definitions: EntityDef[] = [
     pk: 'audit_log_id',
     pkExample: 1284,
     properties: {
-      accion: { type: 'string', enum: ['CREATE', 'UPDATE', 'DELETE', 'REGISTER', 'LOGIN'], example: 'UPDATE', description: 'Acción registrada' },
+      accion: { type: 'string', enum: ['CREATE', 'UPDATE', 'DELETE', 'REGISTER', 'LOGIN', 'INVITE'], example: 'UPDATE', description: 'Acción registrada (`INVITE` = alta de miembro)' },
       tabla: { type: 'string', maxLength: 60, example: 'propiedades', description: 'Tabla afectada (o `sesion` para inicios de sesión)' },
       registro_id: { type: 'string', maxLength: 50, nullable: true, example: '3', description: 'Id del registro afectado' },
       auth_user_id: { type: 'string', maxLength: 36, nullable: true, example: '9f2c1a7e-4b3d-4e5f-8a9b-0c1d2e3f4a5b', description: 'UUID del usuario en Supabase Auth' },
@@ -415,9 +428,14 @@ const definitions: EntityDef[] = [
 
 /** Construye el par de esquemas (completo + input) de una entidad. */
 function buildEntitySchemas(def: EntityDef): Prop {
-  const { name, pk, pkExample, properties, required, example, relations, soloLectura } = def;
+  const { name, pk, pkExample, properties, required, example, relations, computados, soloLectura } = def;
 
-  const { [pk]: _pk, estado: _estado, creado_en: _creado, actualizado_en: _actualizado, ...inputExample } = example;
+  const { [pk]: _pk, estado: _estado, creado_en: _creado, actualizado_en: _actualizado, ...restoExample } = example;
+
+  // El ejemplo del input nunca lleva los campos calculados (son de respuesta).
+  const inputExample = Object.fromEntries(
+    Object.entries(restoExample).filter(([key]) => !computados || !(key in computados))
+  );
 
   // Subobjetos de llaves foráneas: solo en la respuesta, jamás en el input
   // (el payload siempre recibe los ids planos, p. ej. `empresa_id`).
@@ -440,6 +458,8 @@ function buildEntitySchemas(def: EntityDef): Prop {
       [pk]: { ...id(`Identificador único de ${name}`), example: pkExample },
       ...properties,
       ...relationProps,
+      // Campos calculados: solo en la respuesta, nunca en el payload de entrada.
+      ...(computados ?? {}),
       estado: estadoField,
       creado_en: ts('Fecha de creación'),
       actualizado_en: ts('Última modificación'),

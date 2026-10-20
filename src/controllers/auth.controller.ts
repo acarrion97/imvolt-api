@@ -2,9 +2,9 @@
 // Registro, login y perfil del usuario autenticado.
 
 import { Request, Response } from 'express';
-import { authService, RegisterInput } from '../services/auth.service';
+import { authService } from '../services/auth.service';
+import { loginRequest, registerRequest } from '../requests/auth.request';
 import { sessionAuth, orgContext } from '../middlewares/sessionAuth';
-import { ValidationError } from '../core/errors';
 
 const send = (res: Response, error: unknown): void => {
   if (error && typeof error === 'object' && 'statusCode' in error) {
@@ -19,23 +19,20 @@ export class AuthController {
   /** POST /auth/register — crea cuenta + empresa + usuario + rol propietario. */
   static register = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password, nombres, apellidos, telefono, organization_name, ruc } =
-        req.body as Partial<RegisterInput>;
-
-      if (!email || !password || !nombres || !apellidos || !organization_name) {
-        throw new ValidationError('Faltan campos obligatorios del registro', [
-          { field: 'email', message: 'email, password, nombres, apellidos y organization_name son requeridos' },
-        ]);
-      }
+      const input = registerRequest.validateCreate(req.body) as {
+        email: string;
+        password: string;
+        nombres: string;
+        apellidos: string;
+        telefono?: string;
+        organization_name: string;
+        ruc?: string;
+      };
 
       const result = await authService.register({
-        email,
-        password,
-        nombres,
-        apellidos,
-        telefono,
-        organization_name,
-        ruc,
+        ...input,
+        ruc: input.ruc || undefined,
+        telefono: input.telefono || undefined,
       });
 
       res.status(201).json({ message: 'Cuenta creada correctamente', ...result });
@@ -47,10 +44,10 @@ export class AuthController {
   /** POST /auth/login — devuelve los tokens de Supabase Auth. */
   static login = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password } = req.body as { email?: string; password?: string };
-      if (!email || !password) {
-        throw new ValidationError('Email y contraseña son requeridos');
-      }
+      const { email, password } = loginRequest.validateCreate(req.body) as {
+        email: string;
+        password: string;
+      };
       res.json(await authService.login(email, password));
     } catch (error) {
       send(res, error);

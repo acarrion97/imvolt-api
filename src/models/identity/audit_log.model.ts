@@ -6,7 +6,7 @@ import { BaseModel } from "../../core";
 import { Empresa } from "./empresa.model";
 import { UsuarioView } from "./usuario.model";
 
-export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'REGISTER' | 'LOGIN';
+export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'REGISTER' | 'LOGIN' | 'INVITE';
 
 export interface AuditLog extends BaseModel<AuditLog> {
     audit_log_id: number;

@@ -5,7 +5,8 @@
 
 import Joi from 'joi';
 import { BaseRequest } from '../core';
-import { buildSchemas, fk } from './helpers';
+import { ORG_ROLES } from '../middlewares/requireRole';
+import { buildSchemas, estado, fk } from './helpers';
 
 // ── Empresas ────────────────────────────────────────────────────────────────
 const empresaShape = {
@@ -22,6 +23,8 @@ const usuarioShape = {
   telefono: Joi.string().allow(null, '').max(20).description('Teléfono / WhatsApp'),
   empresa_id: fk().description('Empresa a la que pertenece el usuario'),
   contrasenia_temporal_hasta: Joi.date().iso().allow(null).description('Vigencia de la contraseña temporal (ISO 8601)'),
+  // Baja lógica del miembro: `inactivo` revoca el acceso (orgContext responde 403).
+  estado: estado().description('activo | inactivo (inactivo = sin acceso a la plataforma)'),
 };
 
 export const usuarioRequest = new BaseRequest(
@@ -42,6 +45,8 @@ export const permisoRequest = new BaseRequest(buildSchemas(permisoShape, { requi
 const usuarioRolShape = {
   usuario_id: fk().description('Usuario al que se asigna el rol'),
   rol_id: fk().description('Rol asignado'),
+  // Revocación lógica: `inactivo` deja el rol sin efecto sin borrar el vínculo.
+  estado: estado().description('activo | inactivo (inactivo = rol revocado)'),
 };
 
 export const usuarioRolRequest = new BaseRequest(
@@ -107,4 +112,21 @@ export const empresaIntegracionRequest = new BaseRequest(
   buildSchemas(empresaIntegracionShape, {
     required: ['empresa_id', 'integracion_id', 'configuracion_integracion_id', 'referencia_credencial'],
   })
+);
+
+// ── Invitación de miembros (POST /usuarios/invitaciones) ───────────────────
+// Alta de un miembro dentro de la empresa activa: crea la credencial en
+// Supabase Auth con contraseña temporal, la fila local y su rol (§13).
+const invitacionShape = {
+  nombre: Joi.string().min(2).max(120).description('Nombre completo del miembro'),
+  email: Joi.string().email().description('Correo de acceso (único en la plataforma)'),
+  telefono: Joi.string().allow(null, '').max(20).description('Teléfono / WhatsApp'),
+  rol: Joi.string()
+    .valid(...ORG_ROLES)
+    .messages({ 'any.only': `El rol debe ser uno de: ${ORG_ROLES.join(', ')}` })
+    .description('Rol del catálogo §13'),
+};
+
+export const invitacionRequest = new BaseRequest(
+  buildSchemas(invitacionShape, { required: ['nombre', 'email', 'rol'] })
 );

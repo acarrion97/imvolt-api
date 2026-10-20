@@ -11,6 +11,8 @@
 //
 //   req.organizationId → empresa_id activo (se usa como tenant en los CRUD)
 //   req.orgRole        → nombre del primer rol asignado en roles_usuarios
+//   req.orgRoles       → todos sus roles activos
+//   req.permissions    → unión de permisos activos de esos roles (RBAC fino)
 //
 // Esto reemplaza a la tabla `membresias` del esquema anterior: el RBAC ahora
 // vive en usuarios + roles_usuarios + roles (RF-01 / RF-09).
@@ -23,6 +25,13 @@ interface UsuarioRow {
   email: string;
   empresa_id: number | null;
   estado: string;
+}
+
+/** Asignación con el rol incrustado y sus permisos (via roles_permisos). */
+interface RolConPermisos {
+  nombre?: string;
+  estado?: string;
+  roles_permisos?: Array<{ permisos?: { nombre?: string; estado?: string } | null }>;
 }
 
 /** Devuelve 401 si no hay token válido. */
@@ -100,20 +109,38 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
 
     const empresaId = String(local.empresa_id);
 
+    // Roles activos del usuario con sus permisos (RBAC fino): el runtime usa
+    // el nombre del rol (requireRole) y la unión de permisos (requirePermission).
     const { data: asignaciones, error: rolesError } = await supabase
       .from('roles_usuarios')
-      .select('rol_id, estado, roles(nombre, estado)')
+      .select(
+        "rol_id, estado, roles(nombre, estado, roles_permisos(permisos(nombre, estado)))"
+      )
       .eq('usuario_id', local.usuario_id)
       .eq('estado', 'activo');
 
     if (rolesError) throw new Error(rolesError.message);
 
-    const rol = (asignaciones ?? [])
-      .map((asignacion) => (asignacion.roles as unknown as { nombre?: string; estado?: string } | null)?.nombre)
-      .find((nombre): nombre is string => Boolean(nombre));
+    const rolesActivos = (asignaciones ?? [])
+      .map((asignacion) => asignacion.roles as unknown as RolConPermisos | null)
+      .filter((rol): rol is RolConPermisos => Boolean(rol?.nombre) && rol?.estado !== 'inactivo');
+
+    const rol = rolesActivos[0]?.nombre;
+
+    const permisos = new Set<string>();
+    for (const rolActivo of rolesActivos) {
+      for (const vinculo of rolActivo.roles_permisos ?? []) {
+        const permiso = (vinculo as { permisos?: { nombre?: string; estado?: string } | null }).permisos;
+        if (permiso?.nombre && permiso.estado !== 'inactivo') permisos.add(permiso.nombre);
+      }
+    }
 
     req.organizationId = empresaId;
     req.orgRole = rol;
+    req.orgRoles = rolesActivos
+      .map((rolActivo) => rolActivo.nombre)
+      .filter((nombre): nombre is string => Boolean(nombre));
+    req.permissions = [...permisos];
     // Fila local en `usuarios`: la usa la bitácora de auditoría para saber
     // qué usuario de la plataforma realizó la acción.
     req.localUsuarioId = local.usuario_id;

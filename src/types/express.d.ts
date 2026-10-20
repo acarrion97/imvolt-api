@@ -13,8 +13,12 @@ declare global {
       localUsuarioId?: number;
       /** Organización activa del contexto (multi-tenant). */
       organizationId?: string;
-      /** Rol del usuario dentro de la organización activa. */
+      /** Rol del usuario dentro de la organización activa (el primero). */
       orgRole?: string;
+      /** Todos los roles activos del usuario en la organización. */
+      orgRoles?: string[];
+      /** Unión de permisos activos de todos sus roles (RBAC fino). */
+      permissions?: string[];
     }
   }
 }

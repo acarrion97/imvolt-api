@@ -15,7 +15,7 @@ import { BaseService } from './base.service';
 import { HttpError } from './errors';
 
 /** Contexto de auditoría extraído de la sesión (autor + tenant de la acción). */
-const auditContext = (req: Request): AuditContext => ({
+export const auditContext = (req: Request): AuditContext => ({
   authUserId: req.userId,
   usuarioId: req.localUsuarioId,
   empresaId: req.organizationId ?? null,

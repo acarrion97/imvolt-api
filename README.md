@@ -37,14 +37,56 @@ Petición HTTP
 
 - `sessionAuth` valida el token Bearer de Supabase Auth.
 - `orgContext` traduce ese usuario a su fila local en `usuarios` (por email) y
-  resuelve `req.organizationId` (empresa activa; el header `X-Empresa-Id` la
-  permite alternar) y `req.orgRole` (primer rol asignado en `roles_usuarios`).
+  resuelve el contexto de la petición:
+  - `req.organizationId` — empresa activa (tenant). `usuarios.empresa_id` es
+    único en el diagrama, así que el header `X-Empresa-Id` solo puede
+    **confirmar** la empresa propia: cualquier otro valor (o un usuario sin
+    empresa) responde 403.
+  - `req.orgRole` / `req.orgRoles` — el primer rol y **todos** los roles activos
+    del usuario en `roles_usuarios`.
+  - `req.permissions` — unión de los permisos activos de esos roles
+    (`roles_permisos` → `permisos`).
 - `filterByEmpresa` / `assignEmpresaOnCreate` acotan listados y creaciones de
   `usuarios` y `propiedades` a la empresa del token (RF-01 / P0).
 - `requireRole(...roles)` implementa RBAC con los roles sembrados en `roles`:
-  `propietario`, `administrador`, `marketing`, `agente`, `lector`.
+  `propietario`, `administrador`, `marketing`, `agente`, `lector`. Valora
+  **todos** los roles del usuario, no solo el primero.
+- `requirePermission(...permisos)` implementa el RBAC **fino** sobre
+  `roles_permisos` (catálogo: `gestionar_usuarios`, `gestionar_propiedades`,
+  `crear_contenidos`, `gestionar_campanas`, `ver_analitica`,
+  `gestionar_integraciones`). El rol `propietario` es superusuario y hereda
+  todos los permisos, de modo que la empresa nunca se queda sin administración
+  aunque `roles_permisos` esté vacía.
+- `GET /api/auth/me` devuelve además `permisos[]`, que el frontend usa para
+  habilitar o no las acciones de gestión.
 - RLS habilitado sin políticas permisivas en `schema.sql`: el navegador nunca
   toca la base directamente, todo pasa por el API (service role key).
+
+### Gestión de equipo (miembros, roles y alta por invitación)
+
+Sobre el CRUD genérico de `usuarios` y `roles-usuarios`, el módulo añade las
+reglas de administración de un equipo real (`services/miembros.service.ts`):
+
+- **`POST /api/v1/usuarios/invitaciones`** — alta de miembro dentro de la empresa
+  activa: crea la credencial en Supabase Auth con una **contraseña temporal**
+  (vigencia de 7 días), la fila local en `usuarios` y su rol. Requiere
+  propietario/administrador con el permiso `gestionar_usuarios`. Como aún no
+  hay servicio de correo, la contraseña temporal se devuelve en la respuesta
+  para que el invitante la comparta; queda marcada en la bitácora como `INVITE`
+  (nunca en claro).
+- **Asignaciones acotadas y sin duplicados**: asignar un rol exige que el
+  usuario pertenezca a la empresa activa (si no, 404 sin filtrar existencia),
+  que el rol exista, esté activo y sea del catálogo §13, y que no tenga ya ese
+  rol (409 en lugar del error del constraint unique). El mismo criterio aplica
+  al cambiar un rol existente.
+- **Baja lógica**: `PATCH /api/v1/usuarios/:id {estado: 'inactivo'}` revoca el
+  acceso (las siguientes peticiones de ese usuario responden 403), y
+  `PATCH /api/v1/roles-usuarios/:id {estado: 'inactivo'}` revoca un rol sin
+  borrar el vínculo.
+- **Sin auto-bloqueo**: no puedes borrarte ni desactivarte a ti mismo, la
+  empresa no se puede quedar sin un propietario activo (ni borrando usuarios ni
+  revocando su rol) y la empresa no se mueve por `PATCH` (el cambio de tenant
+  es dar de baja aquí e invitar en la otra).
 
 ### Auditoría (`audit_logs`)
 
@@ -52,9 +94,10 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 
 - **Quién**: `auth_user_id` (UUID de Supabase Auth) y `usuario_id` (fila local en
   `usuarios`); **dónde**: `empresa_id` (tenant activo).
-- **Qué**: `accion` (`CREATE` / `UPDATE` / `DELETE` / `REGISTER` / `LOGIN`), `tabla`
-  y `registro_id`. En `DELETE` se guarda además el contenido previo de la fila
-  (`detalles.antes`); en `REGISTER`/`LOGIN`, el alta de cuenta y el inicio de sesión.
+- **Qué**: `accion` (`CREATE` / `UPDATE` / `DELETE` / `REGISTER` / `LOGIN` /
+  `INVITE`), `tabla` y `registro_id`. En `DELETE` se guarda además el contenido
+  previo de la fila (`detalles.antes`); en `REGISTER`/`LOGIN`, el alta de cuenta
+  y el inicio de sesión; en `INVITE`, el alta de un miembro por invitación.
 - **Nunca rompe la operación**: `services/audit.service.ts` es mejor-esfuerzo; si la
   tabla no existe (esquema sin desplegar) se avisa una sola vez y se deshabilita.
 - **Nunca persiste credenciales**: los campos sensibles (`password`, `api_key`,
@@ -75,7 +118,7 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 > ese JWT en cada consulta PostgREST, ejecutándolas con el rol `authenticated`
 > (que `schema.sql` revoca) y respondiendo `permission denied`. El cliente
 > principal nunca tiene sesión y sigue viajando siempre con la service role key.
-| Identity | `/api/v1/empresas`, `/usuarios`, `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones`, `/auditoria` | Tenant, usuarios, RBAC y bitácora (10 recursos CRUD + auditoría de solo lectura) |
+| Identity | `/api/v1/empresas`, `/usuarios` (+ `/usuarios/invitaciones`), `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones`, `/auditoria` | Tenant, miembros del equipo, RBAC y bitácora (10 recursos CRUD + auditoría de solo lectura + invitación de miembros) |
 | Property | `/api/v1/propiedades`, `/tipos-propiedad` | Catálogo de inmuebles |
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
 | Advertising | `/api/v1/objetivos-publicidad`, `/campanias-publicitarias` | Campañas publicitarias |
@@ -94,7 +137,7 @@ los ids planos, que siguen siendo el contrato de escritura):
 
 | Recurso | Subobjetos incrustados |
 |---------|------------------------|
-| `usuario` | `empresa` |
+| `usuario` | `empresa` (+ `roles`: array de nombres de sus roles activos, calculado) |
 | `roles-usuarios` | `usuario` (con su `empresa`), `rol` |
 | `roles-permisos` | `rol`, `permiso` |
 | `empresas-hitos` | `empresa`, `hito_lanzamiento` |
@@ -244,10 +287,11 @@ src/
 ├── requests/        Validaciones Joi por dominio (helpers + dominio.*)
 ├── resources/       Vistas de respuesta por dominio
 ├── controllers/     Un controlador por módulo (createCrudRouter)
-├── routes/          Exposición de routers (+ Swagger de auth y Brand Kit)
-├── services/        auth, higgsfield, meta, credits, strategist,
+├── routes/          Exposición de routers (+ Swagger de auth, identidad y Brand Kit)
+├── services/        auth, audit, miembros (invitación + guardas de equipo),
+│                    higgsfield, meta, credits, strategist,
 │                    brandkit.storage (bucket privado + URL firmada)
-├── types/           Extensiones de Express (userId, organizationId, orgRole)
+├── types/           Extensiones de Express (userId, organizationId, orgRole, orgRoles, permissions)
 └── index.ts         Registro de rutas + fusión de la spec OpenAPI
 database/
 └── schema.sql       Esquema del diagrama + RLS + semillas
