@@ -345,10 +345,18 @@ create table if not exists public.campanias_publicitarias (
     duracion_dias            numeric(8, 2) not null,
     zona_referencia          varchar(50) not null,
     copy_anuncio             text not null,
+    -- Publicación en Meta (siempre PAUSED). Ver migrations/2026-10-27_meta_campaign_publish.sql
+    meta_campaign_id         varchar(40),
+    meta_estado              varchar(20) check (meta_estado is null or meta_estado in ('publicando', 'published_paused')),
+    publicada_en             timestamptz,
     estado                   varchar(20) not null default 'activo',
     creado_en                timestamptz not null default now(),
     actualizado_en           timestamptz not null default now()
 );
+
+create unique index if not exists uq_campanias_meta_campaign
+    on public.campanias_publicitarias (meta_campaign_id)
+    where meta_campaign_id is not null;
 
 -- ── LEADS ────────────────────────────────────────────────────────────────────
 
