@@ -12,7 +12,7 @@ import { AuditContext } from '../services/audit.service';
 import { BaseRequest } from './base.request';
 import { BaseResource } from './base.resource';
 import { BaseService } from './base.service';
-import { HttpError } from './errors';
+import { errorResponse } from './errors';
 
 /** Contexto de auditoría extraído de la sesión (autor + tenant de la acción). */
 export const auditContext = (req: Request): AuditContext => ({
@@ -105,13 +105,9 @@ export class BaseController<T = any> {
     return this.resource ? this.resource.formatMany(rows) : rows;
   }
 
-  /** Respuesta de error estandarizada. */
+  /** Respuesta de error estandarizada (los 5xx no filtran detalles internos). */
   sendError(res: Response, error: unknown): void {
-    if (error instanceof HttpError) {
-      res.status(error.statusCode).json({ message: error.message, details: error.details });
-      return;
-    }
-    const message = error instanceof Error ? error.message : 'Error interno del servidor';
-    res.status(500).json({ message });
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
   }
 }

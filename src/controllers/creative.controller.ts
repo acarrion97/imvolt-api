@@ -18,11 +18,14 @@ import {
   tipoPlantillaResource,
 } from '../resources/creative.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { writeByMarketing } from '../middlewares/requireRole';
+import { writeByMarketing, writeByPlatformAdmin } from '../middlewares/requireRole';
+import { requireOwnedRef } from '../middlewares/tenantScope';
 
+// Catálogos GLOBALES (tipos, plantillas, formatos, enfoques): sin columna de
+// empresa, compartidos por todos los tenants → escritura solo de la plataforma.
 const SEGMENTO = {
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByMarketing],
+  writeMiddlewares: [writeByPlatformAdmin],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 };
 
@@ -76,5 +79,9 @@ export const { router: contenidoIaRouter } = createCrudRouter({
   request: contenidoIaRequest,
   resource: contenidoIaResource,
   entityName: 'Contenido IA',
-  ...SEGMENTO,
+  middlewares: [...requireOrg],
+  writeMiddlewares: [writeByMarketing, requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id')],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  // Sin columna de empresa: el dueño es el de su propiedad.
+  tenantVia: { fk: 'propiedad_id', table: 'propiedades', pk: 'propiedad_id' },
 });

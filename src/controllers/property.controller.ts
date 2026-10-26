@@ -5,8 +5,8 @@ import { createCrudRouter } from '../core/crud.factory';
 import { propiedadRequest, tipoPropiedadRequest } from '../requests/property.request';
 import { propiedadResource, tipoPropiedadResource } from '../resources/property.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { assignEmpresaOnCreate, filterByEmpresa } from '../middlewares/tenantScope';
-import { writeByOwnerOrAdmin } from '../middlewares/requireRole';
+import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
+import { writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 
 // ── Tipos de propiedad (catálogo compartido) ────────────────────────────────
 export const { router: tipoPropiedadRouter } = createCrudRouter({
@@ -16,7 +16,7 @@ export const { router: tipoPropiedadRouter } = createCrudRouter({
   resource: tipoPropiedadResource,
   entityName: 'Tipo de propiedad',
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByOwnerOrAdmin],
+  writeMiddlewares: [writeByPlatformAdmin],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 });
 
@@ -29,6 +29,13 @@ export const { router: propiedadRouter } = createCrudRouter({
   resource: propiedadResource,
   entityName: 'Propiedad',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, assignEmpresaOnCreate],
+  writeMiddlewares: [
+    writeByOwnerOrAdmin,
+    forceEmpresa,
+    requireOwnedRef('proyecto_id', 'proyectos', 'proyecto_id'),
+  ],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  // GET/PATCH/DELETE /propiedades/:id solo dentro de la empresa activa.
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });

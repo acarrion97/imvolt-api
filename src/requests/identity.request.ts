@@ -94,6 +94,7 @@ const configuracionIntegracionShape = {
   api_id: Joi.string().max(100).allow(null, '').description('ID de la aplicación del proveedor'),
   app_secret: Joi.string().max(200).allow(null, '').description('Secreto de aplicación del proveedor'),
   access_token: Joi.string().max(500).allow(null, '').description('Token de acceso vigente'),
+  empresa_id: fk().description('Empresa dueña de la credencial (la fija el API desde la sesión)'),
 };
 
 export const configuracionIntegracionRequest = new BaseRequest(

@@ -16,6 +16,7 @@ export const contactoResource = new BaseResource<any, ContactoView>((row) => ({
   telefono: row.telefono,
   origen: row.origen,
   propiedad_id: row.propiedad_id ?? null,
+  empresa_id: row.empresa_id ?? null,
   estado: row.estado,
   creado_en: row.creado_en,
   actualizado_en: row.actualizado_en,

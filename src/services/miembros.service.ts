@@ -63,6 +63,17 @@ export function rolValido(rol: string): OrgRole {
 }
 
 /**
+ * Solo un propietario puede conceder o revocar el rol `propietario`; si no, un
+ * administrador con `gestionar_usuarios` podría ascenderse (o ascender a un
+ * cómplice) a superusuario de la empresa.
+ */
+export function exigirPropietarioParaRol(rolesDelActor: string[] | undefined, rolObjetivo: string): void {
+  if (rolObjetivo === 'propietario' && !(rolesDelActor ?? []).includes('propietario')) {
+    throw new HttpError(403, 'Solo un propietario puede asignar o revocar el rol propietario');
+  }
+}
+
+/**
  * Crea un miembro nuevo en la empresa activa:
  * Supabase Auth (credencial) + `usuarios` (fila local) + `roles_usuarios` (rol).
  */

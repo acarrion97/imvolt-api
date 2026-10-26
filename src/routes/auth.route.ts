@@ -7,6 +7,7 @@
 import express from 'express';
 import { AuthController } from '../controllers/auth.controller';
 import { sessionAuth, orgContext } from '../middlewares/sessionAuth';
+import { loginRateLimit, registerRateLimit } from '../middlewares/security';
 
 const router = express.Router();
 
@@ -87,7 +88,7 @@ const router = express.Router();
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.post('/register', AuthController.register);
+router.post('/register', registerRateLimit, AuthController.register);
 
 /**
  * @swagger
@@ -126,8 +127,13 @@ router.post('/register', AuthController.register);
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
+ *       429:
+ *         description: Demasiados intentos desde la misma IP (rate limit)
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/Error' }
  */
-router.post('/login', AuthController.login);
+router.post('/login', loginRateLimit, AuthController.login);
 
 /**
  * @swagger
