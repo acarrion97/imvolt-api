@@ -1,5 +1,5 @@
 // docs/schemas.ts
-// Esquemas OpenAPI de las 20 entidades del diagrama relacional.
+// Esquemas OpenAPI de las 28 entidades del diagrama relacional.
 //
 // Por cada entidad se generan DOS esquemas:
 //
@@ -208,6 +208,89 @@ const definitions: EntityDef[] = [
     relations: { empresa: 'Empresa', integracion: 'Integracion', configuracion_integracion: 'ConfiguracionIntegracion' },
   },
 
+  // ── Catálogo (proyectos, propiedades y media assets) ────────────────────
+  {
+    name: 'Proyecto',
+    pk: 'proyecto_id',
+    pkExample: 7,
+    properties: {
+      nombre: { type: 'string', maxLength: 120, example: 'Vista Hermosa Etapa II', description: 'Nombre del proyecto / desarrollo' },
+      tipo: { type: 'string', enum: ['lotizacion', 'urbanizacion', 'edificio', 'proyecto_planos', 'individual'], example: 'lotizacion', description: 'Tipo de desarrollo inmobiliario' },
+      descripcion: { type: 'string', nullable: true, example: '120 lotes con áreas verdes y avenidas principales', description: 'Descripción del proyecto' },
+      ubicacion: { type: 'string', nullable: true, example: 'Vía Daule, Km 8.5', description: 'Dirección o referencia del proyecto' },
+      total_lotes: { type: 'integer', nullable: true, example: 120, description: 'Número total de lotes o unidades del desarrollo' },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['nombre', 'tipo'],
+    example: { proyecto_id: 7, nombre: 'Vista Hermosa Etapa II', tipo: 'lotizacion', descripcion: '120 lotes con áreas verdes y avenidas principales', ubicacion: 'Vía Daule, Km 8.5', total_lotes: 120, empresa_id: 1, estado: 'activo', creado_en: '2026-01-20T10:00:00.000Z', actualizado_en: '2026-03-02T12:00:00.000Z' },
+    relations: { empresa: 'Empresa' },
+  },
+  {
+    name: 'MediaAsset',
+    pk: 'media_asset_id',
+    pkExample: 3,
+    properties: {
+      nombre: { type: 'string', maxLength: 80, example: 'Render torre norte', description: 'Nombre del medio en el catálogo' },
+      categoria: { type: 'string', enum: ['imagen', 'video', 'documento', 'otro'], example: 'imagen', description: 'Categoría del medio: define qué tipos de archivo se aceptan al subir' },
+      descripcion: { type: 'string', nullable: true, example: 'Render exterior al atardecer', description: 'Descripción del medio' },
+      empresa_id: ref('Empresa'),
+      proyecto_id: { type: 'integer', nullable: true, description: 'FK → Proyecto (desarrollo al que pertenece el medio; null = archivo de empresa)', example: 7 },
+      propiedad_id: { type: 'integer', nullable: true, description: 'FK → Propiedad (inmueble fotografiado; null = sin vínculo)', example: null },
+      version_activa_id: { type: 'integer', nullable: true, description: 'FK → MediaAssetVersion (versión que se sirve al previsualizar/descargar; null = sin versiones)', example: 9 },
+    },
+    required: ['nombre'],
+    example: { media_asset_id: 3, nombre: 'Render torre norte', categoria: 'imagen', descripcion: 'Render exterior al atardecer', empresa_id: 1, proyecto_id: 7, propiedad_id: null, version_activa_id: 9, estado: 'activo', creado_en: '2026-02-10T09:30:00.000Z', actualizado_en: '2026-03-05T16:45:00.000Z', proyecto: { proyecto_id: 7, nombre: 'Vista Hermosa Etapa II', tipo: 'lotizacion' }, propiedad: null },
+    relations: { empresa: 'Empresa', version_activa: 'MediaAssetVersion' },
+    // Referencias LIGERAS (no el subárbol completo): el proyecto completo se
+    // sirve en /proyectos y la propiedad completa en /propiedades, evitando
+    // duplicar el árbol en cada respuesta. El binario nunca sale en el CRUD:
+    // se pide una URL firmada en GET /media-assets/:id/descarga (300 s).
+    computados: {
+      proyecto: {
+        type: 'object',
+        nullable: true,
+        readOnly: true,
+        description: 'Referencia ligera del proyecto (solo id, nombre y tipo)',
+        properties: {
+          proyecto_id: { type: 'integer', example: 7 },
+          nombre: { type: 'string', example: 'Vista Hermosa Etapa II' },
+          tipo: { type: 'string', example: 'lotizacion' },
+        },
+      },
+      propiedad: {
+        type: 'object',
+        nullable: true,
+        readOnly: true,
+        description: 'Referencia ligera de la propiedad (solo id, nombre y ubicacion)',
+        properties: {
+          propiedad_id: { type: 'integer', example: 12 },
+          nombre: { type: 'string', example: 'Lote 12-A' },
+          ubicacion: { type: 'string', nullable: true, example: 'Sector Norte, Manzana B' },
+        },
+      },
+    },
+  },
+  {
+    name: 'MediaAssetVersion',
+    pk: 'media_asset_version_id',
+    pkExample: 9,
+    soloLectura: true,
+    properties: {
+      media_asset_id: ref('MediaAsset'),
+      numero: { type: 'integer', example: 3, description: 'Número correlativo de la versión dentro del medio (1 = v1, 2 = v2…)' },
+      nombre_archivo: { type: 'string', maxLength: 200, readOnly: true, example: 'render-torre-norte.jpg', description: 'Nombre del blob en Storage (versión n)' },
+      mime_type: { type: 'string', nullable: true, readOnly: true, example: 'image/jpeg', description: 'MIME detectado en el upload' },
+      tamano_bytes: { type: 'integer', nullable: true, readOnly: true, example: 2411724, description: 'Tamaño en bytes del blob' },
+      nota: { type: 'string', nullable: true, example: 'Corregida la iluminación del hall', description: 'Qué cambió en esta versión (nota opcional del usuario, 500 caracteres máx.)' },
+      subido_por: { type: 'integer', nullable: true, readOnly: true, example: 1, description: 'Usuario local que subió la versión (FK → usuarios)' },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['media_asset_id', 'numero'],
+    // `ruta_storage` (la ruta dentro del bucket) NUNCA se expone: para ver el
+    // archivo hay que pedir la URL firmada en GET /media-assets/:id/versiones/:vid/descarga.
+    example: { media_asset_version_id: 9, media_asset_id: 3, numero: 3, nombre_archivo: 'render-torre-norte.jpg', mime_type: 'image/jpeg', tamano_bytes: 2411724, nota: 'Corregida la iluminación del hall', subido_por: 1, empresa_id: 1, estado: 'activo', creado_en: '2026-03-05T16:45:00.000Z', actualizado_en: '2026-03-05T16:45:00.000Z' },
+  },
+
   // ── Propiedades ──────────────────────────────────────────────────────────
   {
     name: 'TipoPropiedad',
@@ -229,10 +312,26 @@ const definitions: EntityDef[] = [
       descripcion: { type: 'string', maxLength: 2000, example: 'Lotes urbanizados, acceso vial y planes de pago sujetos a verificación.', description: 'Descripción verificable para publicaciones' },
       empresa_id: ref('Empresa'),
       tipo_propiedad_id: ref('TipoPropiedad'),
+      proyecto_id: { type: 'integer', nullable: true, description: 'FK → Proyecto (proyecto o desarrollo al que pertenece el inmueble; null = propiedad suelta)', example: 7 },
     },
     required: ['nombre', 'ubicacion', 'precio', 'disponibilidad', 'descripcion', 'empresa_id', 'tipo_propiedad_id'],
-    example: { propiedad_id: 3, nombre: 'Urbanización Aurora', ubicacion: 'Vía a Machala km 4, Machala, Ecuador', precio: 18900, disponibilidad: 'disponible', descripcion: 'Lotes urbanizados, acceso vial y planes de pago sujetos a verificación.', empresa_id: 1, tipo_propiedad_id: 1, estado: 'activo', creado_en: '2026-02-20T13:45:00.000Z', actualizado_en: '2026-03-05T08:25:00.000Z' },
+    example: { propiedad_id: 3, nombre: 'Urbanización Aurora', ubicacion: 'Vía a Machala km 4, Machala, Ecuador', precio: 18900, disponibilidad: 'disponible', descripcion: 'Lotes urbanizados, acceso vial y planes de pago sujetos a verificación.', empresa_id: 1, tipo_propiedad_id: 1, proyecto_id: 7, estado: 'activo', creado_en: '2026-02-20T13:45:00.000Z', actualizado_en: '2026-03-05T08:25:00.000Z', proyecto: { proyecto_id: 7, nombre: 'Vista Hermosa Etapa II', tipo: 'lotizacion' } },
     relations: { empresa: 'Empresa', tipo_propiedad: 'TipoPropiedad' },
+    // Referencia LIGERA del proyecto (no el subárbol completo): el proyecto con
+    // su empresa se sirve en /proyectos.
+    computados: {
+      proyecto: {
+        type: 'object',
+        nullable: true,
+        readOnly: true,
+        description: 'Referencia ligera del proyecto al que pertenece el inmueble (solo id, nombre y tipo); null si es un inmueble individual',
+        properties: {
+          proyecto_id: { type: 'integer', example: 7 },
+          nombre: { type: 'string', example: 'Vista Hermosa Etapa II' },
+          tipo: { type: 'string', example: 'lotizacion' },
+        },
+      },
+    },
   },
 
   // ── Creative ─────────────────────────────────────────────────────────────

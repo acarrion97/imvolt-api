@@ -128,6 +128,42 @@ export const crudModules: CrudDocConfig[] = [
     ],
   },
 
+  // ── Catálogo ─────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/proyectos',
+    tag: 'Catálogo',
+    schema: 'Proyecto',
+    entity: 'Proyecto',
+    idExample: 7,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      {
+        name: 'tipo',
+        description: 'Filtra por tipo de desarrollo',
+        type: 'string',
+        enum: ['lotizacion', 'urbanizacion', 'edificio', 'proyecto_planos', 'individual'],
+      },
+    ],
+  },
+  {
+    path: '/api/v1/media-assets',
+    tag: 'Catálogo',
+    schema: 'MediaAsset',
+    entity: 'Media asset',
+    idExample: 3,
+    filters: [
+      { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
+      {
+        name: 'categoria',
+        description: 'Filtra por categoría del medio',
+        type: 'string',
+        enum: ['imagen', 'video', 'documento', 'otro'],
+      },
+      { name: 'proyecto_id', description: 'Filtra por proyecto del medio', example: 7 },
+      { name: 'propiedad_id', description: 'Filtra por propiedad fotografiada', example: 12 },
+    ],
+  },
+
   // ── Propiedades ──────────────────────────────────────────────────────────
   {
     path: '/api/v1/propiedades',
@@ -139,6 +175,7 @@ export const crudModules: CrudDocConfig[] = [
     filters: [
       { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
       { name: 'tipo_propiedad_id', description: 'Filtra por tipo de inmueble', example: 1 },
+      { name: 'proyecto_id', description: 'Filtra por proyecto al que pertenece el inmueble', example: 7 },
       {
         name: 'disponibilidad',
         description: 'Filtra por estado comercial',

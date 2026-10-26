@@ -25,6 +25,8 @@ const propiedadShape = {
   descripcion: Joi.string().max(2000).description('Descripción verificable para publicaciones'),
   empresa_id: fk().description('Empresa propietaria del inmueble'),
   tipo_propiedad_id: fk().description('Tipo de propiedad asignado'),
+  // Desarrollo al que pertenece el inmueble; null = propiedad individual.
+  proyecto_id: fk().allow(null).description('Proyecto (desarrollo) al que pertenece la propiedad'),
 };
 
 export const propiedadRequest = new BaseRequest(

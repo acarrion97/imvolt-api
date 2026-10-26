@@ -24,7 +24,7 @@ export const { router: tipoPropiedadRouter } = createCrudRouter({
 export const { router: propiedadRouter } = createCrudRouter({
   table: 'propiedades',
   primaryKey: 'propiedad_id',
-  joins: ['empresas(*)', 'tipos_propiedades(*)'],
+  joins: ['empresas(*)', 'tipos_propiedades(*)', 'proyectos(*)'],
   request: propiedadRequest,
   resource: propiedadResource,
   entityName: 'Propiedad',

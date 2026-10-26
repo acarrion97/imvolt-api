@@ -10,6 +10,7 @@
 export const openapiTags = [
   { name: 'Autenticación', description: 'Registro, inicio de sesión y perfil del usuario IMVOLT' },
   { name: 'Identidad', description: 'Empresas, usuarios, roles, permisos, hitos de lanzamiento e integraciones' },
+  { name: 'Catálogo', description: 'Proyectos inmobiliarios y media assets (medios en bucket privado con versiones)' },
   { name: 'Propiedades', description: 'Catálogo de inmuebles y tipos de propiedad (RF-02)' },
   { name: 'Creative', description: 'Plantillas, formatos, enfoques comerciales y contenidos generados con IA (RF-04 / RF-05)' },
   { name: 'Publicidad', description: 'Objetivos y campañas publicitarias de IMVOLT Ads (RF-07 / RF-08)' },
@@ -110,6 +111,33 @@ export const openapiSchemas = {
       mime_type: 'image/png',
       tamano_bytes: 48213,
       numero: 3,
+    },
+  },
+  MediaAssetDescarga: {
+    type: 'object',
+    description:
+      'Descarga autorizada de un blob del bucket privado `media-assets`: la API valida sesión y tenant y devuelve una URL firmada de corta duración.',
+    properties: {
+      url: {
+        type: 'string',
+        format: 'uri',
+        description: 'URL firmada; caduca a los `expira_en_segundos`.',
+        example: 'https://<proyecto>.supabase.co/storage/v1/object/sign/media-assets/empresa_1/1/v2-render-norte.mp4?token=eyJhbGciOi...',
+      },
+      expira_en_segundos: { type: 'integer', example: 300, description: 'Vigencia de la URL (5 minutos)' },
+      nombre_archivo: { type: 'string', example: 'render-norte-v2.mp4', description: 'Nombre sugerido para la descarga' },
+      mime_type: { type: 'string', nullable: true, example: 'video/mp4' },
+      tamano_bytes: { type: 'integer', nullable: true, example: 48213012 },
+      numero: { type: 'integer', example: 2, description: 'Versión que se está sirviendo' },
+    },
+    required: ['url', 'expira_en_segundos', 'nombre_archivo', 'numero'],
+    example: {
+      url: 'https://<proyecto>.supabase.co/storage/v1/object/sign/media-assets/empresa_1/1/v2-render-norte.mp4?token=eyJhbGciOi...',
+      expira_en_segundos: 300,
+      nombre_archivo: 'render-norte-v2.mp4',
+      mime_type: 'video/mp4',
+      tamano_bytes: 48213012,
+      numero: 2,
     },
   },
 };

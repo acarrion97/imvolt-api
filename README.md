@@ -119,7 +119,8 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 > (que `schema.sql` revoca) y respondiendo `permission denied`. El cliente
 > principal nunca tiene sesión y sigue viajando siempre con la service role key.
 | Identity | `/api/v1/empresas`, `/usuarios` (+ `/usuarios/invitaciones`), `/roles`, `/permisos`, `/roles-usuarios`, `/roles-permisos`, `/hitos-lanzamiento`, `/empresas-hitos`, `/configuraciones-integraciones`, `/empresas-integraciones`, `/auditoria` | Tenant, miembros del equipo, RBAC y bitácora (10 recursos CRUD + auditoría de solo lectura + invitación de miembros) |
-| Property | `/api/v1/propiedades`, `/tipos-propiedad` | Catálogo de inmuebles |
+| Property | `/api/v1/propiedades`, `/tipos-propiedad` | Catálogo de inmuebles (vinculables a un proyecto) |
+| Catalog | `/api/v1/proyectos`, `/api/v1/media-assets` | Proyectos inmobiliarios y media assets (bucket privado con versiones) |
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
 | Advertising | `/api/v1/objetivos-publicidad`, `/campanias-publicitarias` | Campañas publicitarias |
 | Leads | `/api/v1/contactos` | Prospectos captados |
@@ -127,7 +128,7 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 
 Cada módulo CRUD expone `GET /`, `GET /:id`, `POST /`, `PUT /:id`, `PATCH /:id`
 y `DELETE /:id`, con filtros por querystring (`?campo=valor&limite=20&pagina=1`).
-Los 22 recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
+Los 24 recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
 tablas del diagrama relacional (`database/schema.sql`).
 
 ### Respuestas con subobjetos de llaves foráneas
@@ -142,7 +143,9 @@ los ids planos, que siguen siendo el contrato de escritura):
 | `roles-permisos` | `rol`, `permiso` |
 | `empresas-hitos` | `empresa`, `hito_lanzamiento` |
 | `empresas-integraciones` | `empresa`, `integracion`, `configuracion_integracion` |
-| `propiedad` | `empresa`, `tipo_propiedad` |
+| `propiedad` | `empresa`, `tipo_propiedad`, `proyecto` (referencia ligera, nullable) |
+| `proyecto` | `empresa` (+ `propiedades_count` y `media_assets_count`, calculados) |
+| `media-asset` | `empresa`, `version_activa`, `proyecto` y `propiedad` (referencias ligeras, nullable) |
 | `plantilla` | `tipo_plantilla` |
 | `contenido-ia` | `propiedad` (con `empresa` y `tipo_propiedad`), `plantilla`, `formato`, `enfoque_comercial` |
 | `campania-publicitaria` | `propiedad` (con `empresa` y `tipo_propiedad`), `objetivo_publicidad` |
@@ -162,9 +165,9 @@ Cómo funciona:
   de dominio (`UsuarioView`, `PropiedadView`, `ContenidoIaView`, …) que describe
   la forma exacta de la respuesta, con los campos relacionados.
 
-> El módulo `catálogo` (proyectos / media del documento maestro) fue retirado
-> del API: solo existía como referencia del patrón CRUD. El **Brand Kit** sí
-> está implementado (ver abajo).
+> El módulo **Catálogo** (`/api/v1/proyectos` y `/api/v1/media-assets`) está
+> implementado: proyectos inmobiliarios con sus propiedades y medios, siguiendo
+> el patrón Brand Kit para el storage (ver abajo).
 
 ### Brand Kit — archivos con storage y URL firmada
 
@@ -196,6 +199,47 @@ Cómo funciona:
   (`filterByEmpresa`) y escrituras (`empresaEnEscritura`), con
   `tenantScoped/tenantColumn` para responder 404 ante registros ajenos.
 - **Auditoría**: subidas, restauraciones y borrados dejan traza en `audit_logs`.
+
+### Catálogo — proyectos inmobiliarios y media assets
+
+`/api/v1/proyectos` agrupa las propiedades de un desarrollo (`lotizacion`,
+`urbanizacion`, `edificio`, `proyecto_planos`, `individual`) y
+`/api/v1/media-assets` gestiona los medios finales de la empresa (fotos,
+renders, videos, documentos), siguiendo el mismo patrón de storage que el
+Brand Kit:
+
+| Ruta | Qué hace |
+|------|----------|
+| `GET/POST/PUT/PATCH/DELETE /proyectos` | CRUD de proyectos (acotado a empresa) |
+| `GET/POST/PUT/PATCH/DELETE /media-assets` | CRUD de metadatos del medio |
+| `POST /media-assets/:id/versiones` | `multipart/form-data` con el campo `archivo` (+ `nota` opcional): sube una versión y la deja activa |
+| `GET /media-assets/:id/versiones` | Historial de versiones (más reciente primero) |
+| `GET /media-assets/:id/descarga` | URL firmada de la versión activa (5 minutos) |
+| `GET /media-assets/:id/versiones/:vid/descarga` | URL firmada de una versión puntual |
+| `POST /media-assets/:id/versiones/:vid/restaurar` | Devuelve el medio a esa versión |
+| `DELETE /media-assets/:id/versiones/:vid` | Borra fila + blob; si era la activa, activa la más reciente restante |
+| `DELETE /media-assets/:id` | Borra los blobs, el historial y el medio |
+
+- **Bucket privado** `media-assets` (`src/services/media.storage.ts`): la API
+  lo crea o ajusta al arrancar (`asegurarBucket`) con `file_size_limit` de
+  **100 MB** (frente a los 10 MB del Brand Kit) y `allowed_mime_types` del
+  catálogo. `validarArchivo` responde `413` / `400` / `415` según el caso.
+- **El medio es solo metadatos**: el blob vive en Storage y cada subida crea
+  una fila en `media_asset_versions` (número correlativo). `version_activa_id`
+  apunta a la versión que se sirve; `ruta_storage` jamás sale del API.
+- **URL firmada**: toda lectura pasa por `GET .../descarga`, que valida sesión
+  + tenant y devuelve una URL de 300 s.
+- **Vínculo proyecto ↔ propiedad**: `propiedades.proyecto_id` es una FK
+  nullable (`on delete set null`), así que una propiedad puede ser individual.
+  `media_assets` puede apuntar además a un proyecto y/o a una propiedad.
+- **Referencias ligeras**: `proyecto` dentro de `propiedad` y de `media-asset`
+  (y `propiedad` dentro de `media-asset`) se sirven como referencia ligera
+  (id, nombre, tipo/ubicacion), no como subárbol completo: el proyecto con su
+  empresa está en `/proyectos` y la propiedad completa en `/propiedades`.
+- **Permisos y tenant**: proyectos escriben con `writeByOwnerOrAdmin` y medios
+  con `writeByMarketing`; ambos acotan lecturas (`filterByEmpresa`) y fuerzan
+  `empresa_id` en escritura (`empresaEnEscritura`), con `tenantScoped` para
+  responder 404 ante registros ajenos. Auditoría en todas las escrituras.
 
 ### Flujo de generación IA (§09) — adaptadores listos, endpoints pendientes
 
@@ -248,9 +292,9 @@ cp .env.example .env      # en Windows: copy .env.example .env
 npm install
 
 # 1. Ejecuta database/schema.sql en el SQL Editor de Supabase
-#    (25 tablas del diagrama + bucket privado `brand-kit` + RLS denegado por
-#    defecto + semillas de roles, permisos, tipos de propiedad, plantillas,
-#    formatos, enfoques, objetivos, hitos e integraciones)
+#    (28 tablas del diagrama + buckets privados `brand-kit` y `media-assets` +
+#    RLS denegado por defecto + semillas de roles, permisos, tipos de
+#    propiedad, plantillas, formatos, enfoques, objetivos, hitos e integraciones)
 # 2. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env
 
 npm run dev               # desarrollo (ts-node)
@@ -276,6 +320,7 @@ src/
 │   │                 rol_permiso(+View), hito_lanzamiento, empresa_hito(+View),
 │   │                 configuracion_integracion(+View), integracion,
 │   │                 empresa_integraciones(+View)
+│   ├── catalog/      proyecto, media_asset(+View), media_asset_version
 │   ├── property/     propiedad(+View), tipo_propiedad
 │   ├── creative/     plantilla(+View), tipo_plantilla, formato,
 │   │                 enfoque_comercial, contenido_ia(+View), media (tipos IA)
@@ -287,10 +332,12 @@ src/
 ├── requests/        Validaciones Joi por dominio (helpers + dominio.*)
 ├── resources/       Vistas de respuesta por dominio
 ├── controllers/     Un controlador por módulo (createCrudRouter)
-├── routes/          Exposición de routers (+ Swagger de auth, identidad y Brand Kit)
+├── routes/          Exposición de routers (+ Swagger de auth, identidad,
+│                    Brand Kit y Catálogo)
 ├── services/        auth, audit, miembros (invitación + guardas de equipo),
 │                    higgsfield, meta, credits, strategist,
-│                    brandkit.storage (bucket privado + URL firmada)
+│                    brandkit.storage y media.storage (buckets privados +
+│                    URL firmada)
 ├── types/           Extensiones de Express (userId, organizationId, orgRole, orgRoles, permissions)
 └── index.ts         Registro de rutas + fusión de la spec OpenAPI
 database/
@@ -301,8 +348,9 @@ database/
 
 `/documentacion` combina dos fuentes:
 
-1. **Comentarios `@swagger`** en `src/routes/auth.route.ts` y
-   `src/routes/brandkit.route.ts` (endpoints de negocio).
+1. **Comentarios `@swagger`** en `src/routes/auth.route.ts`,
+   `src/routes/brandkit.route.ts` y `src/routes/catalog.route.ts` (endpoints de
+   negocio).
 2. **Spec generada** en `src/docs/`: `schemas.ts` declara cada entidad una vez
    (modelo + ejemplo realista) y `crud-paths.ts` genera las 6 operaciones de
    cada recurso con parámetros, `$ref`, ejemplos y respuestas de error

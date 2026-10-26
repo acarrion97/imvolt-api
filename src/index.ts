@@ -9,6 +9,7 @@
 //   identity      /empresas /usuarios /roles /permisos /roles-usuarios
 //                 /roles-permisos /hitos-lanzamiento /empresas-hitos
 //                 /configuraciones-integraciones /empresas-integraciones
+//   catalog       /proyectos /media-assets (CRUD + versiones multipart y URL firmada)
 //   property      /propiedades /tipos-propiedad
 //   creative      /plantillas /tipos-plantilla /formatos /enfoques-comerciales
 //                 /contenidos-ia
@@ -39,6 +40,7 @@ import {
   usuarioRouter,
 } from './routes/identity.route';
 import { propiedadRouter, tipoPropiedadRouter } from './routes/property.route';
+import { proyectoRouter, mediaAssetRouter } from './routes/catalog.route';
 import {
   contenidoIaRouter,
   enfoqueComercialRouter,
@@ -50,6 +52,7 @@ import { campaniaPublicitariaRouter, objetivoPublicidadRouter } from './routes/a
 import { contactoRouter } from './routes/leads.route';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { asegurarBucket } from './services/brandkit.storage';
+import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { openapiComponents, openapiCrudPaths, openapiTags } from './docs';
 
 dotenv.config();
@@ -89,6 +92,10 @@ app.use('/api/v1/empresas-hitos', empresaHitoRouter);
 app.use('/api/v1/configuraciones-integraciones', configuracionIntegracionRouter);
 app.use('/api/v1/empresas-integraciones', empresaIntegracionRouter);
 app.use('/api/v1/auditoria', auditLogRouter);
+
+// catalog (proyectos + media assets en bucket privado)
+app.use('/api/v1/proyectos', proyectoRouter);
+app.use('/api/v1/media-assets', mediaAssetRouter);
 
 // property
 app.use('/api/v1/propiedades', propiedadRouter);
@@ -180,6 +187,8 @@ app.listen(config.port, () => {
   if (config.meta.simulate) console.log('Meta: MODO SIMULADO (sin credenciales; solo borradores)');
   // Bucket privado del Brand Kit: lo crea/ajusta (10 MB + MIME) sin bloquear el arranque.
   void asegurarBucket();
+  // Bucket privado de Media Assets: lo crea/ajusta (100 MB + MIME) sin bloquear el arranque.
+  void asegurarBucketMedia();
 });
 
 export default app;

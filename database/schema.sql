@@ -3,12 +3,14 @@
 -- Alineado al DIAGRAMA RELACIONAL del proyecto (2026).
 --
 -- Este archivo reemplaza por completo al esquema anterior (documento maestro):
--- se eliminaron organizaciones, membresías, proyectos, media_assets, brand_kits,
--- ai_templates, model_registry, generation_jobs/outputs, meta_connections,
--- campaigns, insights, leads, planes, suscripciones y wallets de créditos.
+-- se eliminaron organizaciones, membresías, brand_kits, ai_templates,
+-- model_registry, generation_jobs/outputs, meta_connections, campaigns,
+-- insights, leads, planes, suscripciones y wallets de créditos. El módulo
+-- CATALOG vuelve con `proyectos` y `media_assets` (+ versiones), que conviven
+-- con `propiedades` y el Brand Kit.
 --
 -- Relación con el código:
---   • Las 22 tablas con CRUD expuesto en /api/v1 tienen su modelo en
+--   • Las 24 rutas CRUD expuestas en /api/v1 tienen su modelo en
 --     src/models/*.model.ts, su Request/Resource y su documentación OpenAPI.
 --   • `brand_assets` / `brand_asset_versions` / `brand_colors` (Brand Kit)
 --     guardan solo METADATOS: los blobs viven en el bucket privado
@@ -147,6 +149,24 @@ create table if not exists public.empresas_integraciones (
     unique (empresa_id, integracion_id)
 );
 
+-- ── CATÁLOGO: PROYECTOS ───────────────────────────────────────────────────────
+-- Un proyecto agrupa propiedades de un mismo desarrollo (lotización,
+-- urbanización, edificio…). `propiedades.proyecto_id` es nullable: las
+-- propiedades sueltas (individuales) pueden quedar sin proyecto.
+
+create table if not exists public.proyectos (
+    proyecto_id    bigserial primary key,
+    nombre         varchar(120) not null,
+    tipo           varchar(30) not null default 'individual',
+    descripcion    text,
+    ubicacion      text,
+    total_lotes    integer,
+    empresa_id     bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado         varchar(20) not null default 'activo',
+    creado_en      timestamptz not null default now(),
+    actualizado_en timestamptz not null default now()
+);
+
 -- ── PROPIEDADES ──────────────────────────────────────────────────────────────
 
 create table if not exists public.tipos_propiedades (
@@ -166,10 +186,92 @@ create table if not exists public.propiedades (
     descripcion        text not null,
     empresa_id         bigint not null references public.empresas (empresa_id),
     tipo_propiedad_id  bigint not null references public.tipos_propiedades (tipo_propiedad_id),
+    -- Desarrollo al que pertenece la propiedad; null = inmueble individual.
+    proyecto_id        bigint references public.proyectos (proyecto_id) on delete set null,
     estado             varchar(20) not null default 'activo',
     creado_en          timestamptz not null default now(),
     actualizado_en     timestamptz not null default now()
 );
+
+-- ── CATÁLOGO: MEDIA ASSETS ───────────────────────────────────────────────────
+-- Medios finales de la empresa (fotos, renders, videos, documentos) guardados
+-- en almacenamiento propio (§12: no depender del CDN del proveedor).
+--
+-- Un MEDIO es solo metadatos: su blob vive en el bucket privado `media-assets`
+-- de Supabase Storage, que este archivo crea y `services/media.storage.ts`
+-- vigila al arrancar. `media_asset_versions` guarda el historial;
+-- `version_activa_id` apunta a la versión que se sirve con URL firmada.
+
+create table if not exists public.media_assets (
+    media_asset_id    bigserial primary key,
+    nombre            varchar(80) not null,
+    -- Categoría: define qué tipos de archivo se aceptan al subir.
+    categoria         varchar(30) not null default 'imagen',
+    descripcion       text,
+    -- Agrupación opcional del medio: un proyecto, una propiedad, o ninguno.
+    proyecto_id       bigint references public.proyectos (proyecto_id) on delete set null,
+    propiedad_id      bigint references public.propiedades (propiedad_id) on delete set null,
+    -- FK hacia abajo: la tabla hija todavía no existe al crear la madre.
+    version_activa_id bigint,
+    empresa_id        bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado            varchar(20) not null default 'activo',
+    creado_en         timestamptz not null default now(),
+    actualizado_en    timestamptz not null default now()
+);
+
+create table if not exists public.media_asset_versions (
+    media_asset_version_id bigserial primary key,
+    media_asset_id         bigint not null references public.media_assets (media_asset_id) on delete cascade,
+    -- Número correlativo dentro del medio (1 = v1, 2 = v2…).
+    numero                 integer not null,
+    nombre_archivo         varchar(200) not null,
+    -- Ruta DENTRO del bucket privado; nunca se expone al cliente como tal.
+    ruta_storage           varchar(300) not null,
+    mime_type              varchar(100),
+    tamano_bytes           bigint,
+    nota                   text,
+    subido_por             bigint references public.usuarios (usuario_id) on delete set null,
+    empresa_id             bigint not null references public.empresas (empresa_id) on delete cascade,
+    estado                 varchar(20) not null default 'activo',
+    creado_en              timestamptz not null default now(),
+    actualizado_en         timestamptz not null default now()
+);
+
+-- Relación inversa (medio → versión activa). El nombre del constraint es el
+-- que PostgREST usa para desambiguar: hay DOS llaves entre ambas tablas y el
+-- API incrusta `media_asset_versions!fk_media_asset_version_activa`.
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'fk_media_asset_version_activa'
+          and conrelid = 'public.media_assets'::regclass
+    ) then
+        alter table public.media_assets
+            add constraint fk_media_asset_version_activa
+            foreign key (version_activa_id)
+            references public.media_asset_versions (media_asset_version_id)
+            on delete set null;
+    end if;
+end $$;
+
+-- Bucket privado de Supabase Storage para los medios: sin acceso público, con
+-- el límite de 100 MB (videos y renders pesados) y el catálogo de tipos que
+-- valida el API antes de subir.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+    'media-assets',
+    'media-assets',
+    false,
+    104857600,
+    array[
+        'image/png', 'image/jpeg', 'image/webp', 'image/svg+xml',
+        'video/mp4', 'video/webm',
+        'application/pdf'
+    ]
+)
+on conflict (id) do nothing;
 
 -- ── CREATIVE ─────────────────────────────────────────────────────────────────
 
@@ -384,8 +486,11 @@ create index if not exists idx_roles_usuarios_rol      on public.roles_usuarios 
 create index if not exists idx_roles_permisos_rol      on public.roles_permisos (rol_id);
 create index if not exists idx_empresas_hitos_empresa  on public.empresas_hitos (empresa_id);
 create index if not exists idx_empresas_int_empresa    on public.empresas_integraciones (empresa_id);
+create index if not exists idx_proyectos_empresa      on public.proyectos (empresa_id);
+create index if not exists idx_proyectos_tipo         on public.proyectos (tipo);
 create index if not exists idx_propiedades_empresa     on public.propiedades (empresa_id);
 create index if not exists idx_propiedades_tipo        on public.propiedades (tipo_propiedad_id);
+create index if not exists idx_propiedades_proyecto    on public.propiedades (proyecto_id);
 create index if not exists idx_propiedades_dispon      on public.propiedades (disponibilidad);
 create index if not exists idx_plantillas_tipo         on public.plantillas (tipo_plantilla_id);
 create index if not exists idx_contenidos_propiedad    on public.contenidos_ia (propiedad_id);
@@ -398,6 +503,12 @@ create index if not exists idx_brand_assets_empresa   on public.brand_assets (em
 create index if not exists idx_brand_assets_estado    on public.brand_assets (estado);
 create index if not exists idx_brand_versions_asset   on public.brand_asset_versions (brand_asset_id);
 create index if not exists idx_brand_versions_numero  on public.brand_asset_versions (brand_asset_id, numero desc);
+create index if not exists idx_media_assets_empresa   on public.media_assets (empresa_id);
+create index if not exists idx_media_assets_estado    on public.media_assets (estado);
+create index if not exists idx_media_assets_proyecto  on public.media_assets (proyecto_id);
+create index if not exists idx_media_assets_propiedad on public.media_assets (propiedad_id);
+create index if not exists idx_media_versions_asset   on public.media_asset_versions (media_asset_id);
+create index if not exists idx_media_versions_numero  on public.media_asset_versions (media_asset_id, numero desc);
 create index if not exists idx_brand_colors_empresa   on public.brand_colors (empresa_id);
 create index if not exists idx_brand_colors_orden     on public.brand_colors (empresa_id, orden);
 create index if not exists idx_audit_empresa           on public.audit_logs (empresa_id);
@@ -417,7 +528,9 @@ begin
         'empresas', 'usuarios', 'roles', 'permisos', 'roles_usuarios',
         'roles_permisos', 'hitos_lanzamientos', 'empresas_hitos',
         'configuraciones_integraciones', 'integraciones', 'empresas_integraciones',
-        'tipos_propiedades', 'propiedades', 'tipos_plantillas', 'plantillas',
+        'proyectos', 'tipos_propiedades', 'propiedades',
+        'media_assets', 'media_asset_versions',
+        'tipos_plantillas', 'plantillas',
         'formatos', 'enfoques_comerciales', 'contenidos_ia',
         'objetivo_publicidad', 'campanias_publicitarias', 'contactos',
         'brand_assets', 'brand_asset_versions', 'brand_colors', 'audit_logs'
