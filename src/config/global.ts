@@ -32,7 +32,7 @@ const asBool = (value: string, fallback: boolean): boolean =>
   value === '' ? fallback : value.toLowerCase() === 'true';
 
 const asList = (value: string): string[] =>
-  value.split(',').map((item) => item.trim()).filter(Boolean);
+  value.split(',').map((item) => item.trim().replace(/\/$/, '')).filter(Boolean);
 
 const asPositiveInt = (value: string, fallback: number): number =>
   Number.isInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
