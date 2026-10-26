@@ -120,6 +120,7 @@ create table if not exists public.configuraciones_integraciones (
     api_id                       varchar(100),
     app_secret                   varchar(200),
     access_token                 varchar(500),
+    empresa_id                   bigint references public.empresas (empresa_id) on delete cascade,
     estado                       varchar(20) not null default 'activo',
     creado_en                    timestamptz not null default now(),
     actualizado_en               timestamptz not null default now()
@@ -359,6 +360,7 @@ create table if not exists public.contactos (
     telefono     varchar(13) not null,
     origen       varchar(20) not null,
     propiedad_id bigint references public.propiedades (propiedad_id) on delete set null,
+    empresa_id   bigint references public.empresas (empresa_id) on delete cascade,
     estado       varchar(20) not null default 'activo',
     creado_en    timestamptz not null default now(),
     actualizado_en timestamptz not null default now()
@@ -480,6 +482,8 @@ create table if not exists public.audit_logs (
 -- ── ÍNDICES (filtros frecuentes de los CRUD) ─────────────────────────────────
 
 create index if not exists idx_usuarios_empresa        on public.usuarios (empresa_id);
+create index if not exists idx_contactos_empresa        on public.contactos (empresa_id);
+create index if not exists idx_config_integraciones_empresa on public.configuraciones_integraciones (empresa_id);
 create index if not exists idx_usuarios_email         on public.usuarios (email);
 create index if not exists idx_roles_usuarios_usuario  on public.roles_usuarios (usuario_id);
 create index if not exists idx_roles_usuarios_rol      on public.roles_usuarios (rol_id);

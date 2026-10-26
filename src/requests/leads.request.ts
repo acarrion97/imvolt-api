@@ -14,6 +14,7 @@ const contactoShape = {
   telefono: Joi.string().max(13).description('Teléfono / WhatsApp'),
   origen: Joi.string().valid(...ORIGENES).description('Canal por el que llegó el contacto'),
   propiedad_id: fk().allow(null).description('Propiedad por la que preguntó (si aplica)'),
+  empresa_id: fk().description('Empresa dueña del contacto (la fija el API desde la sesión)'),
 };
 
 export const contactoRequest = new BaseRequest(

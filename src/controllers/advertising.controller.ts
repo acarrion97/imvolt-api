@@ -5,11 +5,13 @@ import { createCrudRouter } from '../core/crud.factory';
 import { campaniaPublicitariaRequest, objetivoPublicidadRequest } from '../requests/advertising.request';
 import { campaniaPublicitariaResource, objetivoPublicidadResource } from '../resources/advertising.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { writeByMarketing } from '../middlewares/requireRole';
+import { writeByMarketing, writeByPlatformAdmin } from '../middlewares/requireRole';
+import { requireOwnedRef } from '../middlewares/tenantScope';
 
+// Catálogo GLOBAL de objetivos: escritura solo de la plataforma.
 const SEGMENTO = {
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByMarketing],
+  writeMiddlewares: [writeByPlatformAdmin],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 };
 
@@ -31,5 +33,9 @@ export const { router: campaniaPublicitariaRouter } = createCrudRouter({
   request: campaniaPublicitariaRequest,
   resource: campaniaPublicitariaResource,
   entityName: 'Campaña publicitaria',
-  ...SEGMENTO,
+  middlewares: [...requireOrg],
+  writeMiddlewares: [writeByMarketing, requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id')],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  // Sin columna de empresa: el dueño es el de su propiedad.
+  tenantVia: { fk: 'propiedad_id', table: 'propiedades', pk: 'propiedad_id' },
 });

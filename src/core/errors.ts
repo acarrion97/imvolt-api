@@ -31,3 +31,20 @@ export class NotFoundError extends HttpError {
     super(404, `${entity} no encontrado`);
   }
 }
+
+/**
+ * Cuerpo/estado de respuesta para cualquier error capturado.
+ *
+ * Los errores 4xx (validación, permisos, no encontrado) son del cliente y se
+ * devuelven tal cual. Todo lo demás (errores de Supabase/PostgREST, excepciones
+ * inesperadas, 5xx) puede contener nombres de tablas, columnas o
+ * detalles de infraestructura: se registra SOLO en el servidor y el cliente
+ * recibe un mensaje genérico.
+ */
+export function errorResponse(error: unknown): { status: number; body: { message: string; details?: unknown } } {
+  if (error instanceof HttpError && error.statusCode < 500) {
+    return { status: error.statusCode, body: { message: error.message, details: error.details } };
+  }
+  console.error('[error]', error instanceof Error ? `${error.name}: ${error.message}` : 'error desconocido');
+  return { status: 500, body: { message: 'Error interno del servidor' } };
+}

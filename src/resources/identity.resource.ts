@@ -119,6 +119,7 @@ export const empresaHitoResource = new BaseResource<any, EmpresaHitoView>((row) 
 
 export const configuracionIntegracionResource = new BaseResource<any, ConfiguracionIntegracionView>((row) => ({
   configuracion_integracion_id: row.configuracion_integracion_id,
+  empresa_id: row.empresa_id ?? null,
   url_base: row.url_base,
   // Las credenciales nunca salen completas: solo se expone la marca de que existen.
   api_key: row.api_key ? '••••' : null,

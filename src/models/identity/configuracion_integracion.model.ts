@@ -8,6 +8,8 @@ export interface ConfiguracionIntegracion extends BaseModel<ConfiguracionIntegra
     api_id: string|null;
     app_secret: string|null;
     access_token: string|null;
+    /** Empresa dueña de la credencial (tenant). */
+    empresa_id: number | null;
 }
 
 /**

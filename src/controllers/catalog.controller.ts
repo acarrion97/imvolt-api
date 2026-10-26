@@ -213,6 +213,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones',
     ...requireOrg,
+    writeByMarketing,
     subidaMiddleware,
     async (req: Request, res: Response) => {
       try {
@@ -309,6 +310,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones/:vid/restaurar',
     ...requireOrg,
+    writeByMarketing,
     async (req: Request, res: Response) => {
       try {
         const media = await mediaDeSesion(req);
@@ -331,6 +333,7 @@ function registrarRutasStorage(router: Router): void {
   router.delete(
     '/:id/versiones/:vid',
     ...requireOrg,
+    writeByMarketing,
     async (req: Request, res: Response) => {
       try {
         const media = await mediaDeSesion(req);

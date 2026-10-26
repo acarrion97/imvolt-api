@@ -2,17 +2,14 @@
 // Registro, login y perfil del usuario autenticado.
 
 import { Request, Response } from 'express';
+import { errorResponse } from '../core/errors';
 import { authService } from '../services/auth.service';
 import { loginRequest, registerRequest } from '../requests/auth.request';
 import { sessionAuth, orgContext } from '../middlewares/sessionAuth';
 
 const send = (res: Response, error: unknown): void => {
-  if (error && typeof error === 'object' && 'statusCode' in error) {
-    const httpError = error as { statusCode: number; message: string; details?: unknown };
-    res.status(httpError.statusCode).json({ message: httpError.message, details: httpError.details });
-    return;
-  }
-  res.status(500).json({ message: error instanceof Error ? error.message : 'Error interno del servidor' });
+  const { status, body } = errorResponse(error);
+  res.status(status).json(body);
 };
 
 export class AuthController {

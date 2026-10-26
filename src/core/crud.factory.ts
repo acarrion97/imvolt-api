@@ -20,10 +20,14 @@
 //   - registrar rutas extra (ej. GET /estadisticas) sobre el mismo router.
 
 import { Request, RequestHandler, Response, Router } from 'express';
+import supabase from '../config/supabaseClient';
 import { BaseController } from './base.controller';
 import { BaseRequest } from './base.request';
 import { BaseResource } from './base.resource';
 import { BaseService, GetAllOptions } from './base.service';
+
+/** Tope de registros por página (evita listados sin límite). */
+const MAX_LIMITE = 500;
 
 export type CrudMethod = 'getAll' | 'getById' | 'create' | 'update' | 'remove';
 
@@ -80,6 +84,13 @@ export interface CrudRouterConfig<T> {
    * Las tablas del diagrama usan `empresa_id`.
    */
   tenantColumn?: string;
+  /**
+   * Para tablas SIN columna de empresa que cuelgan de otra que sí la tiene
+   * (p. ej. `contenidos_ia.propiedad_id → propiedades.empresa_id`). Acota
+   * listado, lectura, edición y borrado a la empresa activa a través de esa FK.
+   * Un registro cuyo dueño no pueda resolverse se trata como ajeno (fail-closed).
+   */
+  tenantVia?: { fk: string; table: string; pk: string; column?: string };
 }
 
 export interface CrudRouterResult<T> {
@@ -112,12 +123,22 @@ export function createCrudRouter<T = any>(config: CrudRouterConfig<T>): CrudRout
   const listHandler: RequestHandler = async (req: Request, res: Response) => {
     try {
       const { limite, pagina, ...filtros } = req.query as Record<string, string>;
-      const limit = limite ? Number(limite) : undefined;
-      const offset = pagina && limit ? (Number(pagina) - 1) * limit : undefined;
+      const limit = limite ? Math.min(Math.max(Number(limite) || 0, 1), MAX_LIMITE) : undefined;
+      const offset = pagina && limit ? (Math.max(Number(pagina) || 1, 1) - 1) * limit : undefined;
+
+      // Tablas que cuelgan de otra (`tenantVia`): solo las filas cuyo padre es de la empresa activa.
+      let whereIn: Record<string, Array<string | number>> | undefined;
+      if (config.tenantVia) {
+        const { fk, table, pk, column = 'empresa_id' } = config.tenantVia;
+        const { data, error } = await supabase.from(table).select(pk).eq(column, req.organizationId as never);
+        if (error) throw new Error(error.message);
+        whereIn = { [fk]: (data ?? []).map((fila) => (fila as unknown as Record<string, string | number>)[pk]) };
+      }
 
       const rows = await service.getAll({
         ...config.defaultGetAllOptions,
         where: filtros,
+        whereIn,
         limit,
         offset,
       });
@@ -136,14 +157,30 @@ export function createCrudRouter<T = any>(config: CrudRouterConfig<T>): CrudRout
   // organización responde 404, sin filtrar su existencia.
   const tenantColumn = config.tenantColumn ?? 'organization_id';
 
+  // Fail-closed: si el dueño del registro no se puede determinar (columna
+  // nula, FK huérfana) se responde 404 igual que si fuera de otra empresa.
+  const ownerOf = async (row: Record<string, unknown>): Promise<string | null> => {
+    if (!config.tenantVia) return row[tenantColumn] != null ? String(row[tenantColumn]) : null;
+    const { fk, table, pk, column = 'empresa_id' } = config.tenantVia;
+    if (row[fk] == null) return null;
+    const { data, error } = await supabase.from(table).select(column).eq(pk, row[fk] as never).maybeSingle();
+    if (error) throw new Error(error.message);
+    const owner = (data as Record<string, unknown> | null)?.[column];
+    return owner != null ? String(owner) : null;
+  };
+
   const tenantGuard: RequestHandler = async (req: Request, res: Response, next) => {
-    if (!config.tenantScoped || !req.organizationId) {
+    if (!config.tenantScoped && !config.tenantVia) {
       next();
+      return;
+    }
+    if (!req.organizationId) {
+      res.status(401).json({ message: 'Sesión no iniciada' });
       return;
     }
     try {
       const row = (await service.getById(req.params.id)) as Record<string, unknown>;
-      if (row[tenantColumn] && String(row[tenantColumn]) !== req.organizationId) {
+      if ((await ownerOf(row)) !== req.organizationId) {
         res.status(404).json({ message: `Registro no encontrado` });
         return;
       }

@@ -9,6 +9,8 @@ export interface Contacto extends BaseModel<Contacto> {
   correo: string;
   telefono: string;
   origen: string;
+  /** Empresa dueña del contacto (tenant). */
+  empresa_id: number | null;
 }
 
 /** MODELO DE VISUALIZACIÓN: el contacto con la propiedad consultada (si existe). */
