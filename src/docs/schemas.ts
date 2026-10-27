@@ -686,7 +686,7 @@ Object.assign(openapiSchemas, {
     nombre_cuenta: { type: 'string', example: 'IMVOLT Ads' },
     estado: { type: 'string', enum: ['pendiente', 'conectada', 'revocada'] },
     permisos: { type: 'object', nullable: true },
-    autenticada: { type: 'boolean', description: 'Indica si existe un token OAuth cifrado; el token nunca se expone' },
+    autenticada: { type: 'boolean', description: 'Indica si este registro heredado contiene credenciales; la publicación directa usa la configuración privada del servidor' },
     created_at: ts('Fecha de creación'),
   }, ['connection_id', 'organization_id', 'cuenta_publicitaria_id', 'nombre_cuenta', 'estado', 'autenticada', 'created_at'], {
     connection_id: '1', organization_id: '1', cuenta_publicitaria_id: 'act_1234567890',

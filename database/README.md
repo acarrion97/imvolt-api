@@ -20,6 +20,9 @@ framework de migraciones, ni tabla de control, ni artefactos PHP. Son archivos
 - `tabla` o `tabla_columna` en snake_case.
 - Un archivo por tabla al crearla; los cambios incrementales van en su propio
   archivo (por ejemplo `0026_add_medios_autorizados_to_propiedades.sql`).
+- Excepción: los archivos **fechados** (`20261026_...`, `2026-10-27_01_...`)
+  agrupan entregas posteriores a la serie numerada. Se ordenan después de 0036
+  y, dentro del mismo día, por el sufijo `_01`, `_02`, ...
 
 ## Orden
 
@@ -37,6 +40,8 @@ las tablas padre siempre aparecen antes que las hijas.
 | Auditoría | 0025 |
 | Cambios incrementales | 0026 – 0029, 0036 |
 | Semillas | 0030 – 0035 |
+| Tenancy y datos (2026-10-26/27) | `20261026_add_propiedades_proyecto_fk`, `2026-10-26_tenant_hardening`, `2026-10-27_01` – `_05` |
+| Publicación en Meta | `2026-10-27_meta_campaign_publish` |
 
 ## Idempotencia
 
@@ -60,10 +65,21 @@ estado, como la de producción.
    constraint` sin `if not exists` (la 0027 falla si la FK ya existe; es
    intencional, para que el nombre fijo de la restricción quede garantizado).
 
-Todas las migraciones **0001–0035 están aplicadas** en el entorno actual.
-La **0036 (`brand_assets.siguiente_numero`) está pendiente**: mientras no se
-ejecute, el código fuente actual NO puede subir versiones (el `update` escribe
-una columna que aún no existe).
+Todas las migraciones **0001–0036 están aplicadas** en el entorno actual,
+incluidas las fechadas `20261026_add_propiedades_proyecto_fk` y las
+`2026-10-26/27_*`. Verificado el **2026-10-27** contra PostgREST
+(`GET /rest/v1/`): todas las tablas y columnas que crean existen en el esquema
+publicado, entre ellas `brand_assets.siguiente_numero` (0036) y las de Meta
+(`meta_campaign_id`, `meta_estado`, `publicada_en`).
+
+> **`2026-10-27_meta_campaign_publish.sql` — aplicada el 2026-10-27.** Sin
+> estas columnas, `POST /campanias-publicitarias/:id/publicar` fallaba con
+> *"Could not find the 'meta_estado' column ... in the schema cache"* (PGRST204)
+> al pulsar **Enviar a meta**. Única migración pendiente que quedaba.
+
+La migración `2026-10-27_04_campaign_tenant_backfill` solo rellena datos
+(`empresa_id` de campañas existentes) y no deja rastro verificable por esquema:
+comprobar su efecto con un `select` si se duda de ella.
 
 ## Relación con el código
 

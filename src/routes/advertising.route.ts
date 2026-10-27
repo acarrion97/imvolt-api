@@ -11,29 +11,6 @@ export {
 
 /**
  * @swagger
- * /api/v1/conexiones/meta/oauth/start:
- *   get:
- *     summary: Inicia la autorización OAuth de Meta Ads
- *     tags: [Publicidad]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: URL de autorización para redirigir el navegador
- *       401: { $ref: '#/components/responses/Unauthorized' }
- *       403: { description: Falta el permiso gestionar_integraciones }
- *       503: { description: Faltan variables OAuth en el servidor }
- * /api/v1/conexiones/meta/oauth/callback:
- *   get:
- *     summary: Callback OAuth de Meta (registrar como URI de redirección)
- *     tags: [Publicidad]
- *     responses:
- *       302:
- *         description: Regresa a Configuración con el resultado de la conexión
- */
-
-/**
- * @swagger
  * /api/v1/campanias-publicitarias/{id}/publicar:
  *   post:
  *     summary: Publica la campaña en Meta (siempre en estado PAUSADO)
@@ -41,8 +18,8 @@ export {
  *       Crea la campaña en la cuenta de Meta Ads de la empresa con el SDK
  *       oficial: estado `PAUSED` y categoría especial `HOUSING`. **Nunca activa
  *       gasto**; el presupuesto y la segmentación se definen después en el
- *       conjunto de anuncios. Usa la cuenta y el token OAuth cifrado por la
- *       conexión elegida en la campaña. Requiere rol propietario,
+ *       conjunto de anuncios. Usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID`
+ *       configurados únicamente en el backend. Requiere rol propietario,
  *       administrador o marketing con el permiso `gestionar_campanas`.
  *     tags: [Publicidad]
  *     parameters:

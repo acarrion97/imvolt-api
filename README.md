@@ -101,7 +101,7 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
 - **Nunca rompe la operación**: `services/audit.service.ts` es mejor-esfuerzo; si la
   tabla no existe (esquema sin desplegar) se avisa una sola vez y se deshabilita.
 - **Protección de credenciales**: los campos sensibles se enmascaran en respuestas
-  y auditoría; los tokens OAuth de Meta se cifran con AES-256-GCM antes de guardarlos.
+  y auditoría; los tokens nunca se exponen al frontend.
 - **Lectura restringida**: `GET /api/v1/auditoria` (y `GET /:id`) es de solo
   lectura, acotado a la empresa del token y visible solo para `propietario` y
   `administrador`, con filtros `?tabla=&accion=&usuario_id=`.
@@ -357,12 +357,10 @@ duplican esas entidades. El CRUD heredado `/campanias-publicitarias` y
 GET/POST/PATCH/DELETE /api/v1/campaigns
 GET/POST/PATCH/DELETE /api/v1/leads
 GET/DELETE            /api/v1/conexiones
-GET                   /api/v1/conexiones/meta/oauth/start
-GET                   /api/v1/conexiones/meta/oauth/callback (callback Meta)
 ```
 
-El CRUD de campaña REST no sustituye el endpoint de publicación en Meta, que
-permanece en `/api/v1/campanias-publicitarias/:id/publicar`.
+La publicación directa en Meta usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID`
+del entorno privado del backend; no utiliza OAuth ni `META_APP_SECRET`.
 
 ### Créditos (§16)
 
@@ -379,45 +377,24 @@ Sin credenciales la API es completamente funcional en modo simulado:
 | Variable | Efecto |
 |----------|--------|
 | `HIGGSFIELD_SIMULATE=true` (o sin API key) | Jobs simulados con latencia y resultado de demostración |
-| `META_SIMULATE=true` (o sin Meta App) | Borradores, aprobación y "publicación" con IDs simulados |
+| `META_SIMULATE=true` (o sin token/cuenta de Meta) | Borradores, aprobación y "publicación" con IDs simulados |
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
-### Conectar Meta con OAuth
+### Publicar directamente en Meta (sin OAuth)
 
-1. Crea una app de Meta con acceso a Marketing API y configura como URI OAuth
-   válida `META_OAUTH_REDIRECT_URI` (en desarrollo:
-   `http://localhost:3000/api/v1/conexiones/meta/oauth/callback`).
-2. Configura en el backend `META_APP_ID`, `META_APP_SECRET`,
-   `META_OAUTH_REDIRECT_URI` y `META_TOKEN_ENCRYPTION_KEY`. Genera esta última
-   con `openssl rand -hex 32`; almacénala en el gestor de secretos y conserva
-   una copia segura: cambiarla impide descifrar tokens ya guardados.
-3. Ejecuta `database/migrations/2026-10-27_05_meta_oauth_tokens.sql` y reinicia
-   la API con `META_SIMULATE=false`.
-4. En Configuración, pulsa **Conectar con Meta**, autoriza los permisos
-   solicitados y selecciona una de las cuentas importadas en la campaña.
-
-Meta debe aprobar los permisos `ads_management`, `ads_read` y
-`business_management` para los usuarios/clientes previstos. Si el token expira
-o se revocan permisos, vuelve a conectar la cuenta. Las campañas se crean
-pausadas; la activación del gasto se hace en Meta Ads Manager.
-
-### Prueba directa con credenciales locales (sin OAuth)
-
-Para probar la publicación desde el listado sin importar ni conectar cuentas
-en la UI, configura en el `.env` local del backend:
+Configura en el entorno privado del backend un token de acceso de usuario con
+permisos de Marketing API y la cuenta publicitaria:
 
 ```env
-META_ACCESS_TOKEN=<token de usuario nuevo>
-META_AD_ACCOUNT_ID=act_<id numerico>
+META_ACCESS_TOKEN=<token de acceso de usuario>
+META_AD_ACCOUNT_ID=act_<id_numérico>
 META_SIMULATE=false
 ```
 
-No escribas el token en el frontend, el código ni Git. Deja la campaña sin
-conexión seleccionada: la API usará estas variables directamente y no guardará
-el token en la base. Este modo es para desarrollo; para conectar cuentas de
-distintas empresas usa OAuth. El script SDK independiente también puede leer
-`CAMPAIGN_NAME` del `.env`.
+El token no se escribe en el frontend, el código, logs ni Git y no se guarda en
+la base de datos. No se necesita `META_APP_SECRET`, `META_APP_ID` ni OAuth.
+El script SDK independiente también puede leer `CAMPAIGN_NAME` del entorno.
 
 ### Publicar una campaña en Meta
 
@@ -426,12 +403,13 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 `{ "validar_solo": true }` (Meta valida sin crear nada).
 
 - Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
-- Usa la conexión OAuth seleccionada si existe; para pruebas sin conexión,
-  recurre a `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID` locales.
-- Para publicación OAuth: `META_SIMULATE=false`, `META_APP_ID`,
-  `META_APP_SECRET`, `META_OAUTH_REDIRECT_URI` y `META_TOKEN_ENCRYPTION_KEY`.
-- Antes de desplegar ejecuta `database/migrations/2026-10-27_meta_campaign_publish.sql`
-  (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`).
+- Usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID` configurados en el servidor.
+- Para publicación real: `META_SIMULATE=false`; no se usa el secreto de la app
+  ni se requiere flujo OAuth.
+- ✅ Migración **aplicada el 2026-10-27**: `database/migrations/2026-10-27_meta_campaign_publish.sql`
+  (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`). Sin ella este
+  endpoint respondía PGRST204 *"Could not find the 'meta_estado' column ...
+  in the schema cache"*.
 - Responde 409 si la campaña ya se publicó (o se está publicando); 404 si es de otra empresa.
 
 ## Puesta en marcha

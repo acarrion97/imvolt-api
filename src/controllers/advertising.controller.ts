@@ -2,14 +2,12 @@
 // CRUD del módulo Publicidad (IMVOLT Ads): objetivos y campañas publicitarias.
 
 import { Request, Response } from 'express';
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import supabase from '../config/supabaseClient';
 import { createCrudRouter } from '../core/crud.factory';
 import { errorResponse, HttpError, NotFoundError, ValidationError } from '../core/errors';
 import { config } from '../config/global';
 import { logAudit } from '../services/audit.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
-import { decryptMetaToken, encryptMetaToken } from '../services/meta-token.crypto';
 import {
   campaignRequest,
   campaniaPublicitariaRequest,
@@ -23,7 +21,7 @@ import {
   objetivoPublicidadResource,
 } from '../resources/advertising.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { manageIntegrations, requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
+import { requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
 import { resolveField, translateBody, translateQuery } from '../middlewares/contract';
 
@@ -44,173 +42,6 @@ export const { router: objetivoPublicidadRouter } = createCrudRouter({
   ...SEGMENTO,
 });
 
-interface MetaOAuthState {
-  empresaId: string;
-  issuedAt: number;
-  nonce: string;
-}
-
-function firmarEstado(payload: string): string {
-  return createHmac('sha256', config.meta.appSecret).update(payload).digest('base64url');
-}
-
-function crearEstado(empresaId: string): string {
-  const payload = Buffer.from(JSON.stringify({
-    empresaId,
-    issuedAt: Date.now(),
-    nonce: randomBytes(16).toString('hex'),
-  } satisfies MetaOAuthState)).toString('base64url');
-  return `${payload}.${firmarEstado(payload)}`;
-}
-
-function verificarEstado(state: string): MetaOAuthState {
-  const [payload, signature, ...extra] = state.split('.');
-  if (!payload || !signature || extra.length > 0) throw new ValidationError('Estado OAuth inválido');
-  const expected = Buffer.from(firmarEstado(payload));
-  const received = Buffer.from(signature);
-  if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
-    throw new ValidationError('Estado OAuth inválido');
-  }
-  let value: MetaOAuthState;
-  try {
-    value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as MetaOAuthState;
-  } catch {
-    throw new ValidationError('Estado OAuth inválido');
-  }
-  if (
-    !value.empresaId ||
-    !Number.isFinite(value.issuedAt) ||
-    !/^[a-f0-9]{32}$/i.test(value.nonce) ||
-    Date.now() - value.issuedAt > 10 * 60 * 1000 ||
-    value.issuedAt > Date.now() + 30_000
-  ) {
-    throw new ValidationError('La solicitud OAuth expiró; inicia la conexión nuevamente');
-  }
-  return value;
-}
-
-const textoQuery = (value: unknown): string => typeof value === 'string' ? value : '';
-const frontendMetaUrl = (result: 'connected' | 'error' | 'cancelled'): string => {
-  const base = config.allowedOrigin[0];
-  return `${base}/configuracion?meta=${result}`;
-};
-
-async function metaJson(url: URL): Promise<Record<string, unknown>> {
-  const response = await fetch(url);
-  const result = await response.json() as Record<string, unknown>;
-  if (!response.ok || result.error) {
-    const metaError = result.error as { message?: string } | undefined;
-    console.error('[meta-oauth] Meta API rechazó una solicitud', response.status);
-    throw new HttpError(502, metaError?.message ?? 'Meta rechazó la solicitud OAuth');
-  }
-  return result;
-}
-
-async function iniciarOAuthMeta(req: Request, res: Response): Promise<void> {
-  if (!config.meta.appId || !config.meta.appSecret || !config.meta.oauthRedirectUri) {
-    throw new HttpError(503, 'Configura META_APP_ID, META_APP_SECRET y META_OAUTH_REDIRECT_URI en la API');
-  }
-  if (!/^[a-f0-9]{64}$/i.test(config.meta.tokenEncryptionKey)) {
-    throw new HttpError(503, 'Configura META_TOKEN_ENCRYPTION_KEY antes de iniciar OAuth');
-  }
-  const state = crearEstado(req.organizationId as string);
-  const url = new URL(`https://www.facebook.com/${config.meta.apiVersion}/dialog/oauth`);
-  url.search = new URLSearchParams({
-    client_id: config.meta.appId,
-    redirect_uri: config.meta.oauthRedirectUri,
-    response_type: 'code',
-    scope: 'ads_management,ads_read,business_management',
-    state,
-  }).toString();
-  res.json({ authorization_url: url.toString() });
-}
-
-async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
-  const stateValue = textoQuery(req.query.state);
-  try {
-    const state = verificarEstado(stateValue);
-    if (textoQuery(req.query.error)) {
-      res.redirect(frontendMetaUrl('cancelled'));
-      return;
-    }
-    const code = textoQuery(req.query.code);
-    if (!code) throw new ValidationError('Meta no devolvió un código de autorización');
-    if (!config.meta.appId || !config.meta.appSecret || !config.meta.oauthRedirectUri) {
-      throw new HttpError(503, 'La integración OAuth de Meta no está configurada');
-    }
-
-    const tokenUrl = new URL(`https://graph.facebook.com/${config.meta.apiVersion}/oauth/access_token`);
-    tokenUrl.search = new URLSearchParams({
-      client_id: config.meta.appId,
-      client_secret: config.meta.appSecret,
-      redirect_uri: config.meta.oauthRedirectUri,
-      code,
-    }).toString();
-    const shortToken = await metaJson(tokenUrl);
-    const shortAccessToken = String(shortToken.access_token ?? '');
-    if (!shortAccessToken) throw new HttpError(502, 'Meta no devolvió un token de acceso');
-
-    const longTokenUrl = new URL(`https://graph.facebook.com/${config.meta.apiVersion}/oauth/access_token`);
-    longTokenUrl.search = new URLSearchParams({
-      grant_type: 'fb_exchange_token',
-      client_id: config.meta.appId,
-      client_secret: config.meta.appSecret,
-      fb_exchange_token: shortAccessToken,
-    }).toString();
-    const longToken = await metaJson(longTokenUrl);
-    const accessToken = String(longToken.access_token ?? '');
-    if (!accessToken) throw new HttpError(502, 'Meta no devolvió un token de larga duración');
-
-    const permissionsUrl = new URL(`https://graph.facebook.com/${config.meta.apiVersion}/me/permissions`);
-    permissionsUrl.search = new URLSearchParams({ access_token: accessToken }).toString();
-    const permissionsResult = await metaJson(permissionsUrl);
-    const grantedPermissions = ((permissionsResult.data ?? []) as Array<{ permission?: string; status?: string }>)
-      .filter((permission) => permission.status === 'granted')
-      .map((permission) => permission.permission)
-      .filter((permission): permission is string => Boolean(permission));
-    if (!grantedPermissions.includes('ads_management')) {
-      throw new ValidationError('La autorización de Meta no concedió el permiso para administrar anuncios');
-    }
-
-    const accountsUrl = new URL(`https://graph.facebook.com/${config.meta.apiVersion}/me/adaccounts`);
-    accountsUrl.search = new URLSearchParams({
-      fields: 'id,name,account_status',
-      limit: '100',
-      access_token: accessToken,
-    }).toString();
-    const accountsResult = await metaJson(accountsUrl);
-    const accounts = (accountsResult.data ?? []) as Array<{ id?: string; name?: string; account_status?: number }>;
-    const activeAccounts = accounts.filter((account) => account.id && account.account_status === 1);
-    if (!activeAccounts.length) {
-      throw new ValidationError('No hay cuentas publicitarias activas disponibles en esta cuenta de Meta');
-    }
-
-    const expiresIn = Number(longToken.expires_in);
-    const expiresAt = Number.isFinite(expiresIn) && expiresIn > 0
-      ? new Date(Date.now() + expiresIn * 1000).toISOString()
-      : null;
-    const encryptedToken = encryptMetaToken(accessToken);
-    const { error } = await supabase.from('conexiones').upsert(
-      activeAccounts.map((account) => ({
-        empresa_id: Number(state.empresaId),
-        cuenta_publicitaria_id: account.id as string,
-        nombre_cuenta: account.name?.slice(0, 120) || account.id as string,
-        estado: 'conectada',
-        permisos: { granted: grantedPermissions },
-        access_token_enc: encryptedToken,
-        token_expira_en: expiresAt,
-      })),
-      { onConflict: 'empresa_id,cuenta_publicitaria_id' },
-    );
-    if (error) throw new Error(error.message);
-    res.redirect(frontendMetaUrl('connected'));
-  } catch (error) {
-    const { status } = errorResponse(error);
-    console.error('[meta-oauth] No se pudo completar OAuth', status);
-    res.redirect(frontendMetaUrl('error'));
-  }
-}
-
 // ── Conexiones de cuentas publicitarias ────────────────────────────────────
 export const { router: conexionRouter } = createCrudRouter({
   table: 'conexiones',
@@ -219,22 +50,11 @@ export const { router: conexionRouter } = createCrudRouter({
   resource: conexionResource,
   entityName: 'Conexión',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, manageIntegrations, forceEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, forceEmpresa],
   disabled: ['create', 'update'],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
-  extraRoutes: (router) => {
-    router.get('/meta/oauth/start', ...requireOrg, manageIntegrations, (req, res, next) => {
-      iniciarOAuthMeta(req, res).catch(next);
-    });
-    router.get('/meta/oauth/callback', (req, res) => {
-      callbackOAuthMeta(req, res).catch((error) => {
-        console.error('[meta-oauth] Callback falló inesperadamente');
-        res.redirect(frontendMetaUrl('error'));
-      });
-    });
-  },
 });
 
 const slugObjetivo = (value: string): string => value
@@ -293,28 +113,12 @@ export const { router: campaignRouter } = createCrudRouter({
 
 // ── Publicación en Meta ─────────────────────────────────────────────────────
 
-/** Token OAuth cifrado asociado a la cuenta publicitaria elegida en la campaña. */
-async function credencialesMeta(empresaId: string, conexionId: number | null): Promise<MetaCredentials | null> {
-  if (config.meta.accessToken && config.meta.adAccountId) {
-    return {
-      adAccountId: config.meta.adAccountId,
-      accessToken: config.meta.accessToken,
-    };
-  }
-  if (!conexionId) return null;
-  const { data, error } = await supabase
-    .from('conexiones')
-    .select('cuenta_publicitaria_id, access_token_enc, estado, token_expira_en')
-    .eq('conexion_id', conexionId)
-    .eq('empresa_id', empresaId)
-    .eq('estado', 'conectada')
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data?.access_token_enc) return null;
-  if (data.token_expira_en && new Date(data.token_expira_en).getTime() <= Date.now()) return null;
+/** Credenciales configuradas solo en el entorno del servidor. */
+function credencialesMeta(): MetaCredentials | null {
+  if (!config.meta.accessToken || !config.meta.adAccountId) return null;
   return {
-    adAccountId: String(data.cuenta_publicitaria_id),
-    accessToken: decryptMetaToken(String(data.access_token_enc)),
+    adAccountId: config.meta.adAccountId,
+    accessToken: config.meta.accessToken,
   };
 }
 
@@ -348,19 +152,17 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       throw new ValidationError('El presupuesto diario debe ser mayor a cero');
     }
 
-    const credentials = await credencialesMeta(
-      req.organizationId as string,
-      campania.conexion_id == null ? null : Number(campania.conexion_id),
-    );
-    if (!credentials) {
-      throw new ValidationError('Tu empresa no tiene una integración de Meta Ads activa y completa', [
-        { field: 'integracion', message: 'Conecta Meta por OAuth y selecciona una cuenta publicitaria activa en esta campaña' },
+    const credentials = credencialesMeta();
+    if (!credentials && !config.meta.simulate) {
+      throw new HttpError(503, 'Configura META_ACCESS_TOKEN y META_AD_ACCOUNT_ID en el entorno seguro del backend', [
+        { field: 'integracion', message: 'No se encontró el token de acceso ni la cuenta publicitaria del servidor' },
       ]);
     }
     const input = {
       campaniaId: id,
+      nombre: String(campania.nombre),
       objetivo: String(campania.objetivo_publicidad?.nombre ?? ''),
-      credentials,
+      credentials: credentials ?? { adAccountId: '', accessToken: '' },
     };
 
     if (validarSolo) {

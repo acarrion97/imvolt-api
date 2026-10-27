@@ -5,7 +5,7 @@
 // publicitario ni modifica presupuestos sin autorización registrada. Los
 // recursos se crean siempre en PAUSED cuando el flujo de API lo permite.
 //
-// Sin META_APP_ID (o con META_SIMULATE=true) el servicio opera en modo
+// Sin META_ACCESS_TOKEN/META_AD_ACCOUNT_ID (o con META_SIMULATE=true) el servicio opera en modo
 // simulado: crea IDs ficticios y devuelve insights de demostración, para
 // desarrollar el flujo completo de borrador → aprobación → publicación
 // pausada sin permisos de Meta.
@@ -90,6 +90,7 @@ export interface MetaCredentials {
 
 export interface PublishCampaniaInput {
   campaniaId: number;
+  nombre: string;
   /** Nombre del objetivo de publicidad (catálogo: Mensajes, Formularios, Visitas, Tráfico, Branding). */
   objetivo: string;
   credentials: MetaCredentials;
@@ -157,7 +158,7 @@ async function publishCampaniaPaused(input: PublishCampaniaInput): Promise<Publi
   bizSdk.FacebookAdsApi.init(input.credentials.accessToken);
 
   const params: Record<string, unknown> = {
-    name: `IMVOLT · ${input.objetivo} · #${input.campaniaId}`,
+    name: input.nombre,
     objective,
     status: 'PAUSED',
     special_ad_categories: ['HOUSING'],
