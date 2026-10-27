@@ -12,7 +12,8 @@ export const {
   SUPABASE_SERVICE_ROLE_KEY = '',
   SUPABASE_ANON_KEY = '',
   HIGGSFIELD_BASE_URL = 'https://api.higgsfield.ai',
-  HIGGSFIELD_API_KEY = '',
+  HIGGSFIELD_API_KEY_ID = '',
+  HIGGSFIELD_API_KEY_SECRET = '',
   HIGGSFIELD_SIMULATE = 'true',
   META_ACCESS_TOKEN = '',
   META_AD_ACCOUNT_ID = '',
@@ -72,9 +73,11 @@ export const config = {
   },
   higgsfield: {
     baseUrl: HIGGSFIELD_BASE_URL.replace(/\/+$/, ''),
-    apiKey: HIGGSFIELD_API_KEY,
+    apiKeyId: HIGGSFIELD_API_KEY_ID,
+    apiKeySecret: HIGGSFIELD_API_KEY_SECRET,
     /** Sin API key la generación se simula para poder desarrollar el MVP. */
-    simulate: asBool(HIGGSFIELD_SIMULATE, true) || HIGGSFIELD_API_KEY === '',
+    simulate: asBool(HIGGSFIELD_SIMULATE, true) ||
+      HIGGSFIELD_API_KEY_ID === '' || HIGGSFIELD_API_KEY_SECRET === '',
   },
   meta: {
     accessToken: META_ACCESS_TOKEN,

@@ -6,12 +6,11 @@
 // siempre del backend. La API expone tres operaciones:
 //
 //   quote(modelo, configuración) → costo estimado en créditos
-//   createJob(entrada)           → { request_id, status_url }
-//   getStatus(request_id)        → queued | processing | completed | failed
+//   createJob(entrada)           → { request_id, status }
+//   getStatus(request_id)        → estado normalizado + URL del resultado
 //
-// Sin HIGGSFIELD_API_KEY (o con HIGGSFIELD_SIMULATE=true) el adaptador
-// SIMULA el proveedor: crea un job con latencia y devuelve un resultado de
-// demostración. Así el MVP es desarrollable y testeable sin credenciales.
+// Sin el ID y secreto de Higgsfield (o con HIGGSFIELD_SIMULATE=true), el
+// adaptador simula el proveedor para desarrollar sin credenciales.
 
 import axios from 'axios';
 import { config } from '../config/global';
@@ -35,9 +34,17 @@ export interface HiggsfieldJobRequest {
 
 export interface HiggsfieldJobStatus {
   request_id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
   result_url?: string;
   error?: string;
+}
+
+interface ProviderStatusResponse {
+  request_id: string;
+  status: string;
+  error?: string | null;
+  images?: Array<{ url: string }>;
+  video?: { url: string };
 }
 
 interface SimulatedJob {
@@ -54,6 +61,45 @@ const client = axios.create({
   baseURL: config.higgsfield.baseUrl,
   timeout: 30000,
 });
+
+const MODEL_WORKFLOWS: Record<string, { endpoint: string; mediaType: MediaType }> = {
+  'higgsfield-ai/soul/v2/standard': {
+    endpoint: 'higgsfield-ai/soul/v2/standard',
+    mediaType: 'image',
+  },
+  // Existing deployments may still have the pre-migration catalog identifier.
+  'higgsfield/soul-4-image': {
+    endpoint: 'higgsfield-ai/soul/v2/standard',
+    mediaType: 'image',
+  },
+  'kling-video/v2.6/pro/text-to-video': {
+    endpoint: 'kling-video/v2.6/pro/text-to-video',
+    mediaType: 'video',
+  },
+  'higgsfield/veo3-video': {
+    endpoint: 'kling-video/v2.6/pro/text-to-video',
+    mediaType: 'video',
+  },
+};
+
+function providerHeaders(idempotencyKey?: string) {
+  return {
+    Authorization: `Key ${config.higgsfield.apiKeyId}:${config.higgsfield.apiKeySecret}`,
+    ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+  };
+}
+
+function providerError(error: unknown, operation: string): never {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const responseData = error.response?.data as { detail?: unknown } | undefined;
+    const detail = typeof responseData?.detail === 'string'
+      ? responseData.detail
+      : error.message;
+    throw new Error(`Higgsfield ${operation} falló${status ? ` (${status})` : ''}: ${detail}`);
+  }
+  throw error;
+}
 
 /** Tarifa base por tipo de medio; el multiplicador comercial se aplica en credits.service. */
 function quote(
@@ -72,30 +118,46 @@ function quote(
   };
 }
 
-async function createJob(request: HiggsfieldJobRequest): Promise<HiggsfieldJobStatus> {
+async function createJob(
+  request: HiggsfieldJobRequest,
+  idempotencyKey?: string,
+): Promise<HiggsfieldJobStatus> {
   if (config.higgsfield.simulate) {
     const requestId = `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     simulatedJobs.set(requestId, { createdAt: Date.now(), request });
     return { request_id: requestId, status: 'queued' };
   }
 
-  const { data } = await client.post(
-    '/v1/generations',
-    {
-      model: request.provider_model_id,
-      type: request.media_type === 'video' ? 'text-to-video' : 'txt2img',
-      params: {
-        prompt: request.prompt,
-        image_url: request.image_url,
-        duration: request.duration,
-        ratio: request.ratio,
-        resolution: request.resolution,
-      },
-    },
-    { headers: { Authorization: `Key ${config.higgsfield.apiKey}` } },
-  );
+  const workflow = MODEL_WORKFLOWS[request.provider_model_id];
+  if (!workflow || workflow.mediaType !== request.media_type) {
+    throw new Error(`Workflow Higgsfield no configurado para el modelo "${request.provider_model_id}".`);
+  }
 
-  return { request_id: data.request_id, status: 'queued' };
+  const payload: Record<string, unknown> = {
+    prompt: request.prompt,
+  };
+  if (request.ratio) payload.aspect_ratio = request.ratio;
+  if (request.media_type === 'image' && request.resolution) {
+    payload.resolution = request.resolution;
+  }
+  if (request.media_type === 'video' && request.duration !== undefined) {
+    if (request.duration !== 5 && request.duration !== 10) {
+      throw new Error('Kling 2.6 solo admite duración de 5 o 10 segundos.');
+    }
+    payload.duration = request.duration;
+  }
+
+  try {
+    const { data } = await client.post<{ request_id: string; status: string }>(
+      `/${workflow.endpoint}`,
+      payload,
+      { headers: { ...providerHeaders(idempotencyKey), 'Content-Type': 'application/json' } },
+    );
+    if (!data.request_id) throw new Error('Higgsfield no devolvió request_id al aceptar la generación.');
+    return { request_id: data.request_id, status: 'queued' };
+  } catch (error) {
+    providerError(error, 'createJob');
+  }
 }
 
 async function getStatus(requestId: string): Promise<HiggsfieldJobStatus> {
@@ -117,16 +179,31 @@ async function getStatus(requestId: string): Promise<HiggsfieldJobStatus> {
     };
   }
 
-  const { data } = await client.get(`/v1/generations/${requestId}`, {
-    headers: { Authorization: `Key ${config.higgsfield.apiKey}` },
-  });
-
-  return {
-    request_id: requestId,
-    status: data.status,
-    result_url: data.result_url,
-    error: data.error,
-  };
+  try {
+    const { data } = await client.get<ProviderStatusResponse>(
+      `/requests/${encodeURIComponent(requestId)}/status`,
+      { headers: providerHeaders() },
+    );
+    const statusMap: Record<string, HiggsfieldJobStatus['status']> = {
+      queued: 'queued',
+      in_progress: 'processing',
+      completed: 'completed',
+      failed: 'failed',
+      nsfw: 'failed',
+      canceled: 'canceled',
+    };
+    const status = statusMap[data.status];
+    if (!status) throw new Error(`Estado Higgsfield desconocido: "${data.status}".`);
+    const resultUrl = data.video?.url ?? data.images?.[0]?.url;
+    return {
+      request_id: requestId,
+      status,
+      result_url: resultUrl,
+      error: data.error ?? (data.status === 'nsfw' ? 'El proveedor rechazó el contenido.' : undefined),
+    };
+  } catch (error) {
+    providerError(error, 'getStatus');
+  }
 }
 
 export const higgsfieldService = { quote, createJob, getStatus };

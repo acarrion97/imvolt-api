@@ -376,10 +376,15 @@ Sin credenciales la API es completamente funcional en modo simulado:
 
 | Variable | Efecto |
 |----------|--------|
-| `HIGGSFIELD_SIMULATE=true` (o sin API key) | Jobs simulados con latencia y resultado de demostración |
+| `HIGGSFIELD_SIMULATE=true` (o sin ID + secreto de API) | Jobs simulados con latencia y resultado de demostración |
 | `META_SIMULATE=true` (o sin token/cuenta de Meta) | Borradores, aprobación y "publicación" con IDs simulados |
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
+
+Para usar la API real, configura en el backend `HIGGSFIELD_API_KEY_ID`,
+`HIGGSFIELD_API_KEY_SECRET` y `HIGGSFIELD_SIMULATE=false`. El catálogo activo
+usa SOUL V2 para imágenes y Kling 2.6 para video, con los endpoints y formatos
+documentados oficialmente por Higgsfield.
 
 ### Publicar directamente en Meta (sin OAuth)
 

@@ -140,6 +140,13 @@ const generationCreate: RequestHandler = async (req, res) => {
         { field: 'parametros.duration', message: `Usa una duración entre ${model.duracion_min_s} y ${model.duracion_max_s} segundos.` },
       ]);
     }
+    if (['kling-video/v2.6/pro/text-to-video', 'higgsfield/veo3-video']
+      .includes(model.modelo_proveedor_id) &&
+      duration !== 5 && duration !== 10) {
+      throw new ValidationError('Duración no soportada por el modelo', [
+        { field: 'parametros.duration', message: 'Kling 2.6 admite únicamente 5 o 10 segundos.' },
+      ]);
+    }
     if (params.ratio && Array.isArray(model.ratios) && !model.ratios.includes(String(params.ratio))) {
       throw new ValidationError('Formato de imagen no soportado por el modelo', [
         { field: 'parametros.ratio', message: 'Selecciona una relación de aspecto disponible para este modelo.' },
@@ -180,7 +187,7 @@ const generationCreate: RequestHandler = async (req, res) => {
       duration: model.tipo_media === 'video' ? duration : undefined,
       ratio: typeof params.ratio === 'string' ? params.ratio : undefined,
       resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
-    });
+    }, String(generation.generacion_id));
 
     const completed = config.higgsfield.simulate;
     const updated = await generationService.update<Generacion>(generation.generacion_id, {
@@ -211,22 +218,26 @@ const generationGetById: RequestHandler = async (req, res) => {
     const generation = await generationService.getById<Generacion>(req.params.id);
     if (!ESTADOS_FINALES.has(generation.estado) && generation.peticion_proveedor_id) {
       const status = await higgsfieldService.getStatus(generation.peticion_proveedor_id);
-      if (status.status === 'failed') {
+      if (status.status === 'failed' || status.status === 'canceled') {
+        const finalStatus = status.status === 'canceled' ? 'canceled' : 'failed';
         await creditsService.refund(
           String(generation.empresa_id),
           generation.creditos_costo,
           String(generation.generacion_id),
         );
         const updated = await generationService.update<Generacion>(generation.generacion_id, {
-          estado: 'failed',
+          estado: finalStatus,
           error_mensaje: status.error ?? 'El proveedor no pudo completar la generación',
         });
         res.json(generacionResource.format(updated));
         return;
       }
-      if (status.status !== generation.estado) {
+      if (status.status !== generation.estado || status.result_url) {
         const updated = await generationService.update<Generacion>(generation.generacion_id, {
           estado: status.status,
+          parametros: status.result_url
+            ? { ...generation.parametros, result_url: status.result_url }
+            : generation.parametros,
         });
         res.json(generacionResource.format(updated));
         return;

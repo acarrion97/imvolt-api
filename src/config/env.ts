@@ -80,9 +80,15 @@ export function validateEnv(env: Env): EnvReport {
   if (prod && origins.length === 0) errors.push('ALLOWED_ORIGIN es obligatoria en producción.');
 
   // ── Higgsfield / Meta: si NO se simula, las credenciales son obligatorias ──
-  const higgsfieldSimulate = isTrue(env.HIGGSFIELD_SIMULATE, true) || get('HIGGSFIELD_API_KEY') === '';
-  if (!isTrue(env.HIGGSFIELD_SIMULATE, true) && get('HIGGSFIELD_API_KEY') === '') {
-    errors.push('HIGGSFIELD_SIMULATE=false requiere HIGGSFIELD_API_KEY.');
+  const higgsfieldKeyId = get('HIGGSFIELD_API_KEY_ID');
+  const higgsfieldKeySecret = get('HIGGSFIELD_API_KEY_SECRET');
+  const hasHiggsfieldCredentials = higgsfieldKeyId !== '' && higgsfieldKeySecret !== '';
+  if ((higgsfieldKeyId === '') !== (higgsfieldKeySecret === '')) {
+    errors.push('HIGGSFIELD_API_KEY_ID y HIGGSFIELD_API_KEY_SECRET deben configurarse juntos.');
+  }
+  const higgsfieldSimulate = isTrue(env.HIGGSFIELD_SIMULATE, true) || !hasHiggsfieldCredentials;
+  if (!isTrue(env.HIGGSFIELD_SIMULATE, true) && !hasHiggsfieldCredentials) {
+    errors.push('HIGGSFIELD_SIMULATE=false requiere HIGGSFIELD_API_KEY_ID y HIGGSFIELD_API_KEY_SECRET.');
   }
   const higgsfieldUrl = get('HIGGSFIELD_BASE_URL');
   if (higgsfieldUrl && parseUrl(higgsfieldUrl)?.protocol !== 'https:') {

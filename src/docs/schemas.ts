@@ -778,9 +778,11 @@ Object.assign(openapiSchemas, {
     status: { type: 'string', enum: ['activo', 'inactivo', 'no_disponible'] },
     created_at: ts('Fecha de creación'),
   }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'quote_creditos', 'status', 'created_at'], {
-    model_id: '1', provider: 'higgsfield', provider_model_id: 'higgsfield/soul-4-image',
-    nombre: 'Soul 4 Image', media_type: 'image', capabilities: {}, duracion_min_s: null,
-    duracion_max_s: null, ratios: ['1:1', '4:5'], quote_creditos: 2, status: 'activo',
+    model_id: '1', provider: 'higgsfield', provider_model_id: 'higgsfield-ai/soul/v2/standard',
+    nombre: 'SOUL V2', media_type: 'image', capabilities: { resolution: ['720p', '1080p'] },
+    duracion_min_s: null, duracion_max_s: null,
+    ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2'],
+    quote_creditos: 2, status: 'activo',
     created_at: '2026-03-06T09:00:00.000Z',
   }, 'Modelo de IA disponible para cotización y generación'),
   Generacion: contractSchema({
