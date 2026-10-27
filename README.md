@@ -100,8 +100,8 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
   y el inicio de sesión; en `INVITE`, el alta de un miembro por invitación.
 - **Nunca rompe la operación**: `services/audit.service.ts` es mejor-esfuerzo; si la
   tabla no existe (esquema sin desplegar) se avisa una sola vez y se deshabilita.
-- **Nunca persiste credenciales**: los campos sensibles (`password`, `api_key`,
-  `app_secret`, `access_token`…) se enmascaran como `••••` antes de guardarlos.
+- **Protección de credenciales**: los campos sensibles se enmascaran en respuestas
+  y auditoría; los tokens OAuth de Meta se cifran con AES-256-GCM antes de guardarlos.
 - **Lectura restringida**: `GET /api/v1/auditoria` (y `GET /:id`) es de solo
   lectura, acotado a la empresa del token y visible solo para `propietario` y
   `administrador`, con filtros `?tabla=&accion=&usuario_id=`.
@@ -308,7 +308,9 @@ duplican esas entidades. El CRUD heredado `/campanias-publicitarias` y
 ```
 GET/POST/PATCH/DELETE /api/v1/campaigns
 GET/POST/PATCH/DELETE /api/v1/leads
-GET/POST/DELETE       /api/v1/conexiones
+GET/DELETE            /api/v1/conexiones
+GET                   /api/v1/conexiones/meta/oauth/start
+GET                   /api/v1/conexiones/meta/oauth/callback (callback Meta)
 ```
 
 El CRUD de campaña REST no sustituye el endpoint de publicación en Meta, que
@@ -333,6 +335,25 @@ Sin credenciales la API es completamente funcional en modo simulado:
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
+### Conectar Meta con OAuth
+
+1. Crea una app de Meta con acceso a Marketing API y configura como URI OAuth
+   válida `META_OAUTH_REDIRECT_URI` (en desarrollo:
+   `http://localhost:3000/api/v1/conexiones/meta/oauth/callback`).
+2. Configura en el backend `META_APP_ID`, `META_APP_SECRET`,
+   `META_OAUTH_REDIRECT_URI` y `META_TOKEN_ENCRYPTION_KEY`. Genera esta última
+   con `openssl rand -hex 32`; almacénala en el gestor de secretos y conserva
+   una copia segura: cambiarla impide descifrar tokens ya guardados.
+3. Ejecuta `database/migrations/2026-10-27_05_meta_oauth_tokens.sql` y reinicia
+   la API con `META_SIMULATE=false`.
+4. En Configuración, pulsa **Conectar con Meta**, autoriza los permisos
+   solicitados y selecciona una de las cuentas importadas en la campaña.
+
+Meta debe aprobar los permisos `ads_management`, `ads_read` y
+`business_management` para los usuarios/clientes previstos. Si el token expira
+o se revocan permisos, vuelve a conectar la cuenta. Las campañas se crean
+pausadas; la activación del gasto se hace en Meta Ads Manager.
+
 ### Publicar una campaña en Meta
 
 `POST /api/v1/campanias-publicitarias/:id/publicar` crea la campaña en Meta con el SDK
@@ -340,9 +361,10 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 `{ "validar_solo": true }` (Meta valida sin crear nada).
 
 - Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
-- Usa la integración **Meta Ads** activa de la empresa: `api_id` = cuenta publicitaria
-  (`act_…`) y `access_token` en `configuraciones_integraciones`.
-- Con credenciales reales: `META_SIMULATE=false`, `META_APP_ID` y `META_APP_SECRET`.
+- Usa la conexión OAuth seleccionada en la campaña; el token se cifra en
+  `conexiones.access_token_enc` y nunca se devuelve al navegador.
+- Para publicación real: `META_SIMULATE=false`, `META_APP_ID`,
+  `META_APP_SECRET`, `META_OAUTH_REDIRECT_URI` y `META_TOKEN_ENCRYPTION_KEY`.
 - Antes de desplegar ejecuta `database/migrations/2026-10-27_meta_campaign_publish.sql`
   (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`).
 - Responde 409 si la campaña ya se publicó (o se está publicando); 404 si es de otra empresa.
@@ -360,6 +382,7 @@ npm install
 #      migrations/2026-10-27_02_campaign_lead_contract.sql
 #      migrations/2026-10-27_03_credit_ledger.sql
 #      migrations/2026-10-27_04_campaign_tenant_backfill.sql
+#      migrations/2026-10-27_05_meta_oauth_tokens.sql
 #      migrations/2026-10-27_meta_campaign_publish.sql (publicación Meta)
 #    Las campañas y leads reutilizan las tablas existentes; no se crean tablas
 #    duplicadas para esos recursos.

@@ -16,6 +16,8 @@ export interface Conexion {
   estado: ConexionEstado;
   /** Alcances otorgados por Meta (guardados al conectar). */
   permisos: Record<string, unknown> | null;
+  access_token_enc: string | null;
+  token_expira_en: string | null;
   creado_en: string;
   actualizado_en: string;
 }
@@ -28,5 +30,6 @@ export interface ConexionView {
   nombre_cuenta: string;
   estado: ConexionEstado;
   permisos: Record<string, unknown> | null;
+  autenticada: boolean;
   created_at: string;
 }

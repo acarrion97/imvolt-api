@@ -24,6 +24,10 @@ export const conexionResource = new BaseResource<any, ConexionView>((row) => ({
   nombre_cuenta: row.nombre_cuenta,
   estado: row.estado,
   permisos: row.permisos ?? null,
+  autenticada: Boolean(
+    row.access_token_enc &&
+    (!row.token_expira_en || new Date(row.token_expira_en).getTime() > Date.now()),
+  ),
   created_at: new Date(row.creado_en).toISOString(),
 }));
 

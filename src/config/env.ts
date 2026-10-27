@@ -93,8 +93,26 @@ export function validateEnv(env: Env): EnvReport {
   if (!isTrue(env.META_SIMULATE, true) && !metaCreds) {
     errors.push('META_SIMULATE=false requiere META_APP_ID y META_APP_SECRET.');
   }
+  const tokenEncryptionKey = get('META_TOKEN_ENCRYPTION_KEY');
+  if (tokenEncryptionKey && !/^[a-f0-9]{64}$/i.test(tokenEncryptionKey)) {
+    errors.push('META_TOKEN_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
+  } else if (!isTrue(env.META_SIMULATE, true) && !tokenEncryptionKey) {
+    errors.push('META_SIMULATE=false requiere META_TOKEN_ENCRYPTION_KEY para proteger los tokens OAuth.');
+  }
+  const metaRedirectUri = get('META_OAUTH_REDIRECT_URI');
+  if (metaRedirectUri) {
+    const url = parseUrl(metaRedirectUri);
+    if (!url || !/^https?:$/.test(url.protocol) || url.hash) {
+      errors.push('META_OAUTH_REDIRECT_URI debe ser una URL http(s) absoluta sin fragmento.');
+    } else if (prod && url.protocol !== 'https:') {
+      errors.push('META_OAUTH_REDIRECT_URI debe usar https:// en producción.');
+    }
+  }
   if ((get('META_APP_ID') === '') !== (get('META_APP_SECRET') === '')) {
     errors.push('META_APP_ID y META_APP_SECRET deben definirse juntas.');
+  }
+  if ((get('META_APP_ID') !== '' || get('META_APP_SECRET') !== '') && !metaRedirectUri) {
+    warnings.push('META_OAUTH_REDIRECT_URI no definida: no se podrá iniciar OAuth para Meta.');
   }
   if (get('META_API_VERSION') && !/^v\d+\.\d+$/.test(get('META_API_VERSION'))) {
     errors.push('META_API_VERSION debe tener la forma "v21.0".');

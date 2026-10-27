@@ -618,10 +618,11 @@ Object.assign(openapiSchemas, {
     nombre_cuenta: { type: 'string', example: 'IMVOLT Ads' },
     estado: { type: 'string', enum: ['pendiente', 'conectada', 'revocada'] },
     permisos: { type: 'object', nullable: true },
+    autenticada: { type: 'boolean', description: 'Indica si existe un token OAuth cifrado; el token nunca se expone' },
     created_at: ts('Fecha de creación'),
-  }, ['connection_id', 'organization_id', 'cuenta_publicitaria_id', 'nombre_cuenta', 'estado', 'created_at'], {
+  }, ['connection_id', 'organization_id', 'cuenta_publicitaria_id', 'nombre_cuenta', 'estado', 'autenticada', 'created_at'], {
     connection_id: '1', organization_id: '1', cuenta_publicitaria_id: 'act_1234567890',
-    nombre_cuenta: 'IMVOLT Ads', estado: 'conectada', permisos: null, created_at: '2026-03-06T09:00:00.000Z',
+    nombre_cuenta: 'IMVOLT Ads', estado: 'conectada', permisos: null, autenticada: true, created_at: '2026-03-06T09:00:00.000Z',
   }, 'Conexión de cuenta publicitaria de la empresa'),
   ConexionInput: contractSchema({
     cuenta_publicitaria_id: { type: 'string' },

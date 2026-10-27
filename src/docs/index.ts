@@ -274,6 +274,7 @@ export const crudModules: CrudDocConfig[] = [
     entity: 'Conexión',
     female: true,
     idExample: 2,
+    disabled: ['create', 'update'],
     filters: [{ name: 'estado', description: 'Filtra por estado de conexión', type: 'string', enum: ['pendiente', 'conectada', 'revocada'] }],
   },
   {
