@@ -1,15 +1,18 @@
 // resources/brandkit.resource.ts
 // Vistas de respuesta del módulo Brand Kit.
 //
-// `brand_asset` incrusta su empresa y la versión activa (la que se sirve al
-// previsualizar/descargar). `brand_color` incrusta su empresa.
+// `brand_asset` incrusta su `empresa` (FK → empresas) y su `version_activa`
+// (FK → brand_asset_versions, con nombre de constraint fijo para PostgREST).
+// `brand_color` incrusta únicamente su `empresa`.
 
 import { BaseResource } from '../core/base.resource';
+import { Empresa } from '../models/identity/empresa.model';
 import { BrandAssetVersion } from '../models/brandkit/brand_asset_version.model';
 import { BrandAssetView } from '../models/brandkit/brand_asset.model';
 import { BrandColorView } from '../models/brandkit/brand_color.model';
 import { empresaResource } from './identity.resource';
 
+/** Vista de una versión del archivo (blob dentro del bucket privado). */
 export const brandAssetVersionResource = new BaseResource<
   any,
   Omit<BrandAssetVersion, 'ruta_storage'>
@@ -30,12 +33,14 @@ export const brandAssetVersionResource = new BaseResource<
   actualizado_en: row.actualizado_en,
 }));
 
+/** Vista del archivo de marca con su versión activa. */
 export const brandAssetResource = new BaseResource<any, BrandAssetView>((row) => ({
   brand_asset_id: row.brand_asset_id,
   nombre: row.nombre,
   categoria: row.categoria,
   descripcion: row.descripcion ?? null,
   version_activa_id: row.version_activa_id ?? null,
+  siguiente_numero: row.siguiente_numero ?? 1,
   empresa_id: row.empresa_id,
   estado: row.estado,
   creado_en: row.creado_en,
@@ -48,6 +53,7 @@ export const brandAssetResource = new BaseResource<any, BrandAssetView>((row) =>
     : null,
 }));
 
+/** Vista del color de la paleta. */
 export const brandColorResource = new BaseResource<any, BrandColorView>((row) => ({
   brand_color_id: row.brand_color_id,
   nombre: row.nombre,

@@ -166,11 +166,11 @@ Ejecuta `database/migrations/2026-10-26_tenant_hardening.sql` **antes** de despl
 | Creative | `/api/v1/plantillas`, `/tipos-plantilla`, `/formatos`, `/enfoques-comerciales`, `/contenidos-ia` | Estudio IA |
 | Advertising | `/api/v1/objetivos-publicidad`, `/campanias-publicitarias` | Campañas publicitarias |
 | Leads | `/api/v1/contactos` | Prospectos captados |
-| Brand Kit | `/api/v1/brand-assets`, `/api/v1/brand-colors` | Identidad de marca: archivos con versiones en bucket privado y colores de la paleta |
+| Brand Kit | `/api/v1/brand-assets`, `/api/v1/brand-colors` | Biblioteca de marca: archivos con control de versiones y paleta de colores |
 
 Cada módulo CRUD expone `GET /`, `GET /:id`, `POST /`, `PUT /:id`, `PATCH /:id`
 y `DELETE /:id`, con filtros por querystring (`?campo=valor&limite=20&pagina=1`).
-Los 24 recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
+Los recursos CRUD corresponden 1:1 a los modelos de `src/models/` y a las
 tablas del diagrama relacional (`database/schema.sql`).
 
 ### Respuestas con subobjetos de llaves foráneas
@@ -192,6 +192,8 @@ los ids planos, que siguen siendo el contrato de escritura):
 | `contenido-ia` | `propiedad` (con `empresa` y `tipo_propiedad`), `plantilla`, `formato`, `enfoque_comercial` |
 | `campania-publicitaria` | `propiedad` (con `empresa` y `tipo_propiedad`), `objetivo_publicidad` |
 | `contacto` | `propiedad` (con `empresa` y `tipo_propiedad`) |
+| `brand-asset` | `empresa`, `version_activa` (versión del archivo que se sirve al descargar) |
+| `brand-color` | `empresa` |
 
 Cómo funciona:
 
@@ -211,6 +213,52 @@ Cómo funciona:
 > implementado: proyectos inmobiliarios con sus propiedades y medios, siguiendo
 > el patrón Brand Kit para el storage (ver abajo).
 
+### Brand Kit — archivos de marca con versiones (bucket privado)
+
+Los archivos del Brand Kit (logos, tipografías, documentos) viven en el
+**bucket privado `brand-kit`** de Supabase Storage; el navegador nunca lo lee
+en directo. La descarga siempre pasa por el API, que valida sesión + tenant y
+emite una signed URL de 5 minutos (`createSignedUrl`).
+
+Estructura de ruta (aislamiento por tenant):
+
+```
+empresa_{empresa_id}/{brand_asset_id}/v{numero}-{nombre_archivo}
+```
+
+Rutas de negocio (`extraRoutes` del CRUD, documentadas con `@swagger` en
+`src/routes/brandkit.route.ts`):
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/v1/brand-assets/:id/versiones` | **multipart**: sube una versión (máx. 10 MB, tipo validado por contenido); queda activa |
+| `GET` | `/api/v1/brand-assets/:id/versiones` | Historial completo (v1 → vn, numeración monotónica) |
+| `GET` | `/api/v1/brand-assets/:id/descarga` | Signed URL de la **versión activa** (5 min) |
+| `GET` | `/api/v1/brand-assets/:id/versiones/:vid/descarga` | Signed URL de una versión concreta |
+| `POST` | `/api/v1/brand-assets/:id/versiones/:vid/restaurar` | Vuelve a activar una versión antigua |
+| `DELETE` | `/api/v1/brand-assets/:id/versiones/:vid` | Borra la versión y su blob (reapunta la activa) |
+
+Los metadatos (nombre, categoría, notas) se manejan con el CRUD estándar; el
+blob viaja **solo** por `POST /:id/versiones` (multer en memoria, sin disco).
+Escribir requiere rol `propietario | administrador | marketing`; leer y
+descargar lo puede hacer cualquier miembro de la empresa (`readOnly`).
+
+**Validación del archivo.** El tipo se comprueba por **contenido** (magic
+bytes), no por el `Content-Type` que declara el cliente en el multipart: un
+PNG subido como `text/plain` se acepta y se guarda con `contentType:
+image/png`, mientras que un texto disfrazado de PNG se rechaza con `415`.
+El límite de 10 MB responde `413`. Todos los errores salen en JSON
+`{ message, details? }`: nunca HTML ni el stack de la petición.
+
+**Numeración de versiones.** El número es **monotónico**: lo lleva el
+contador `brand_assets.siguiente_numero`, que solo avanza. Borrar la versión
+más reciente NO libera su número, así que la numeración nunca se repite
+(migración `0036`).
+
+Precondición: ejecutar las migraciones de `database/migrations/` en el SQL
+Editor de Supabase, en orden (ver `database/README.md`). La 0022–0024 crean
+`brand_assets`, `brand_asset_versions` y `brand_colors`; la 0028 crea el
+bucket; la 0036 añade el contador de numeración. Todas son idempotentes.
 ### Brand Kit — archivos con storage y URL firmada
 
 `/api/v1/brand-assets` es un CRUD de metadatos con rutas propias de storage y

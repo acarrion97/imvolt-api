@@ -167,7 +167,10 @@ const eliminarAsset: RequestHandler = async (req: Request, res: Response) => {
       await storage
         .borrarArchivos(versiones.map((version) => version.ruta_storage))
         .catch((error) =>
-          console.warn('[brand-kit] No se pudieron borrar blobs:', (error as Error).message)
+          console.warn(
+            '[brand-kit] No se pudieron borrar blobs:',
+            error instanceof Error ? error.message : error
+          )
         );
       for (const version of versiones) {
         await brandAssetVersionService.remove(version.brand_asset_version_id, audit(req));
@@ -213,19 +216,25 @@ function registrarRutasStorage(router: Router): void {
           throw new ValidationError('Adjunta un archivo en el campo "archivo".');
         }
 
-        // Límite + tipo de archivo según la categoría del Brand Asset.
         const mime = storage.validarArchivo(
-          { nombre: file.originalname, mime: file.mimetype, bytes: file.size },
+          {
+            nombre: file.originalname,
+            mime: file.mimetype,
+            bytes: file.size,
+            buffer: file.buffer,
+          },
           asset.categoria
         );
         const nombre = storage.nombreArchivoSeguro(file.originalname);
 
-        // Número correlativo de versión (1, 2, 3…): se lee el máximo actual.
         const previas = await brandAssetVersionService.getAll<Pick<BrandAssetVersion, 'numero'>>({
           where: { brand_asset_id: asset.brand_asset_id },
           columns: ['numero'],
         });
-        const numero = previas.reduce((max, version) => Math.max(max, version.numero), 0) + 1;
+        const numero = Math.max(
+          asset.siguiente_numero ?? 1,
+          previas.reduce((max, version) => Math.max(max, version.numero), 0) + 1
+        );
         const ruta = storage.rutaVersion(asset.empresa_id, asset.brand_asset_id, numero, nombre);
 
         await storage.subirArchivo(ruta, file.buffer, mime);
@@ -247,15 +256,16 @@ function registrarRutasStorage(router: Router): void {
             audit(req)
           );
         } catch (error) {
-          // No dejar un blob huérfano si la fila no pudo crearse.
           await storage.borrarArchivos([ruta]).catch(() => undefined);
           throw error;
         }
 
-        // La versión recién subida pasa a ser la activa.
         await brandAssetService.update(
           asset.brand_asset_id,
-          { version_activa_id: version.brand_asset_version_id },
+          {
+            version_activa_id: version.brand_asset_version_id,
+            siguiente_numero: numero + 1,
+          },
           audit(req)
         );
 

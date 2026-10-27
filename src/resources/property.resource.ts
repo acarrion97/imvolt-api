@@ -25,6 +25,7 @@ export const propiedadResource = new BaseResource<any, PropiedadView>((row) => (
   precio: row.precio,
   disponibilidad: row.disponibilidad,
   descripcion: row.descripcion,
+  medios_autorizados: Array.isArray(row.medios_autorizados) ? row.medios_autorizados : [],
   empresa_id: row.empresa_id,
   tipo_propiedad_id: row.tipo_propiedad_id,
   proyecto_id: row.proyecto_id ?? null,

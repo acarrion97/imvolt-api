@@ -3,6 +3,7 @@
 
 import Joi from 'joi';
 import { BaseRequest } from '../core';
+import { MEDIOS_AUTORIZADOS } from '../models/property/propiedad.model';
 import { buildSchemas, fk } from './helpers';
 
 // ── Tipos de propiedad ──────────────────────────────────────────────────────
@@ -23,6 +24,10 @@ const propiedadShape = {
     .valid('disponible', 'reservada', 'vendida', 'no_disponible')
     .description('Estado comercial del inmueble'),
   descripcion: Joi.string().max(2000).description('Descripción verificable para publicaciones'),
+  medios_autorizados: Joi.array()
+    .items(Joi.string().valid(...MEDIOS_AUTORIZADOS))
+    .max(MEDIOS_AUTORIZADOS.length)
+    .description('Canales de publicación autorizados para la propiedad'),
   empresa_id: fk().description('Empresa propietaria del inmueble'),
   tipo_propiedad_id: fk().description('Tipo de propiedad asignado'),
   // Desarrollo al que pertenece el inmueble; null = propiedad individual.
@@ -32,6 +37,6 @@ const propiedadShape = {
 export const propiedadRequest = new BaseRequest(
   buildSchemas(propiedadShape, {
     required: ['nombre', 'ubicacion', 'precio', 'disponibilidad', 'descripcion', 'empresa_id', 'tipo_propiedad_id'],
-    defaults: { disponibilidad: 'disponible' },
+    defaults: { disponibilidad: 'disponible', medios_autorizados: [] },
   })
 );

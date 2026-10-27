@@ -359,6 +359,7 @@ export const crudModules: CrudDocConfig[] = [
     tag: 'Brand Kit',
     schema: 'BrandAsset',
     entity: 'Archivo de marca',
+    plural: 'Archivos de marca',
     female: true,
     idExample: 1,
     filters: [
@@ -376,12 +377,14 @@ export const crudModules: CrudDocConfig[] = [
     tag: 'Brand Kit',
     schema: 'BrandColor',
     entity: 'Color de marca',
-    idExample: 1,
+    plural: 'Colores de marca',
+    female: true,
+    idExample: 3,
     filters: [
       { name: 'empresa_id', description: 'Filtra por empresa (se fuerza desde la sesión)', example: 1 },
       {
         name: 'uso',
-        description: 'Filtra por rol del color',
+        description: 'Filtra por rol del color en la identidad',
         type: 'string',
         enum: ['principal', 'secundario', 'acento', 'fondo', 'texto'],
       },

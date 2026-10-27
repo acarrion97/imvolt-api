@@ -10,6 +10,8 @@
 // El esquema de entrada se deriva del completo quitando los campos de solo
 // lectura, de modo que la documentación nunca se desalinea del modelo.
 
+import { MEDIOS_AUTORIZADOS } from '../models/property/propiedad.model';
+
 type Prop = Record<string, any>;
 
 interface EntityDef {
@@ -311,6 +313,13 @@ const definitions: EntityDef[] = [
       precio: { type: 'number', format: 'double', example: 18900, description: 'Precio de referencia' },
       disponibilidad: { type: 'string', enum: ['disponible', 'reservada', 'vendida', 'no_disponible'], default: 'disponible', example: 'disponible', description: 'Estado comercial del inmueble' },
       descripcion: { type: 'string', maxLength: 2000, example: 'Lotes urbanizados, acceso vial y planes de pago sujetos a verificación.', description: 'Descripción verificable para publicaciones' },
+      medios_autorizados: {
+        type: 'array',
+        items: { type: 'string', enum: [...MEDIOS_AUTORIZADOS] },
+        default: [],
+        example: ['meta_ads', 'instagram', 'whatsapp'],
+        description: 'Canales de publicación donde la empresa AUTORIZA difundir la propiedad',
+      },
       empresa_id: ref('Empresa'),
       tipo_propiedad_id: ref('TipoPropiedad'),
       proyecto_id: { type: 'integer', nullable: true, description: 'FK → Proyecto (proyecto o desarrollo al que pertenece el inmueble; null = propiedad suelta)', example: 7 },
@@ -442,6 +451,65 @@ const definitions: EntityDef[] = [
     required: ['nombres', 'apellidos', 'correo', 'telefono', 'origen'],
     example: { contacto_id: 42, nombres: 'María Fernanda', apellidos: 'Rivas Ochoa', correo: 'maria.rivas@correo.com', telefono: '+593991234567', origen: 'meta_formulario', propiedad_id: 3, estado: 'activo', creado_en: '2026-03-06T11:02:00.000Z', actualizado_en: '2026-03-06T11:02:00.000Z' },
     relations: { propiedad: 'Propiedad' },
+  },
+
+  // ── Brand Kit ────────────────────────────────────────────────────────────
+  {
+    name: 'BrandAsset',
+    pk: 'brand_asset_id',
+    pkExample: 1,
+    properties: {
+      nombre: { type: 'string', maxLength: 80, example: 'Logo horizontal principal', description: 'Nombre del archivo de marca' },
+      categoria: {
+        type: 'string',
+        enum: ['logo_horizontal', 'logo_isotipo', 'tipografia', 'imagen_referencia', 'plantilla_documento', 'otro'],
+        default: 'logo_horizontal',
+        example: 'logo_horizontal',
+        description: 'Categoría del archivo dentro de la identidad',
+      },
+      descripcion: { type: 'string', maxLength: 500, nullable: true, example: 'Versión principal sobre fondo claro', description: 'Notas de uso del archivo' },
+      version_activa_id: { type: 'integer', nullable: true, readOnly: true, example: 2, description: 'FK → BrandAssetVersion (versión que se sirve al descargar)' },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['nombre', 'categoria'],
+    example: { brand_asset_id: 1, nombre: 'Logo horizontal principal', categoria: 'logo_horizontal', descripcion: 'Versión principal sobre fondo claro', version_activa_id: 2, empresa_id: 1, estado: 'activo', creado_en: '2026-03-04T15:30:00.000Z', actualizado_en: '2026-03-06T10:12:00.000Z' },
+    relations: { empresa: 'Empresa', version_activa: 'BrandAssetVersion' },
+  },
+  {
+    name: 'BrandAssetVersion',
+    pk: 'brand_asset_version_id',
+    pkExample: 2,
+    properties: {
+      brand_asset_id: { type: 'integer', description: 'FK → BrandAsset', example: 1 },
+      numero: { type: 'integer', readOnly: true, example: 2, description: 'Número correlativo de la versión (1 = v1)' },
+      nombre_archivo: { type: 'string', maxLength: 200, readOnly: true, example: 'logo_horizontal_v2.png', description: 'Nombre normalizado del archivo subido' },
+      ruta_storage: { type: 'string', maxLength: 300, readOnly: true, example: 'empresa_1/1/v2-logo_horizontal_v2.png', description: 'Ruta dentro del bucket privado `brand-kit` (no es una URL pública)' },
+      mime_type: { type: 'string', maxLength: 100, nullable: true, readOnly: true, example: 'image/png', description: 'Tipo MIME detectado en la subida' },
+      tamano_bytes: { type: 'integer', nullable: true, readOnly: true, example: 48210, description: 'Tamaño del archivo en bytes' },
+      nota: { type: 'string', maxLength: 500, nullable: true, example: 'Margen de seguridad ampliado', description: 'Qué cambió en esta versión' },
+      subido_por: { type: 'integer', nullable: true, description: 'FK → Usuario (quien subió la versión)', example: 7 },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['brand_asset_id', 'nombre_archivo', 'ruta_storage'],
+    example: { brand_asset_version_id: 2, brand_asset_id: 1, numero: 2, nombre_archivo: 'logo_horizontal_v2.png', ruta_storage: 'empresa_1/1/v2-logo_horizontal_v2.png', mime_type: 'image/png', tamano_bytes: 48210, nota: 'Margen de seguridad ampliado', subido_por: 7, empresa_id: 1, estado: 'activo', creado_en: '2026-03-06T10:12:00.000Z', actualizado_en: '2026-03-06T10:12:00.000Z' },
+    // Las versiones no se crean con JSON: se suben por multipart en
+    // `POST /brand-assets/{id}/versiones`. Se omite el Input.
+    soloLectura: true,
+  },
+  {
+    name: 'BrandColor',
+    pk: 'brand_color_id',
+    pkExample: 3,
+    properties: {
+      nombre: { type: 'string', maxLength: 50, example: 'Verde IMVOLT', description: 'Nombre del color' },
+      hex: { type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', example: '#00D94B', description: 'Código hexadecimal (#RRGGBB)' },
+      uso: { type: 'string', enum: ['principal', 'secundario', 'acento', 'fondo', 'texto'], default: 'principal', example: 'principal', description: 'Rol del color dentro de la identidad' },
+      orden: { type: 'integer', minimum: 0, default: 0, example: 0, description: 'Orden de presentación en la paleta' },
+      empresa_id: ref('Empresa'),
+    },
+    required: ['nombre', 'hex'],
+    example: { brand_color_id: 3, nombre: 'Verde IMVOLT', hex: '#00D94B', uso: 'principal', orden: 0, empresa_id: 1, estado: 'activo', creado_en: '2026-03-04T15:30:00.000Z', actualizado_en: '2026-03-04T15:30:00.000Z' },
+    relations: { empresa: 'Empresa' },
   },
 
   // ── Auditoría ────────────────────────────────────────────────────────────

@@ -1,9 +1,7 @@
-// routes/brandkit.route.ts
 // Routers del módulo Brand Kit (archivos de marca + colores de la paleta).
 //
-// El CRUD se documenta con la spec generada (`src/docs`); las rutas PROPIAS de
-// storage (subida multipart, historial y descargas con URL firmada) se
-// documentan a mano con @swagger, igual que los endpoints de negocio de auth.
+// El CRUD se documenta con la spec generada (`src/docs`); las rutas propias de
+// storage se documentan a mano con @swagger.
 
 export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.controller';
 
@@ -36,9 +34,8 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  *     summary: Sube una nueva versión del archivo (pasa a ser la activa)
  *     description: >
  *       Recibe `multipart/form-data` con el campo `archivo` y una `nota`
- *       opcional. Valida el **límite de 10 MB** y el **catálogo de tipos**
- *       según la categoría del archivo; si pasa, sube el blob al bucket y
- *       actualiza `version_activa_id`.
+ *       opcional. Valida el límite de 10 MB y el tipo de archivo según la
+ *       categoría; si pasa, sube el blob al bucket y activa la versión.
  *     tags: [Brand Kit]
  *     parameters:
  *       - name: id
@@ -57,7 +54,7 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  *               archivo:
  *                 type: string
  *                 format: binary
- *                 description: "Máximo 10 MB. Tipos según categoría (png, svg, webp, jpeg, woff/woff2, ttf, otf, pdf)."
+ *                 description: Máximo 10 MB; tipos permitidos según categoría.
  *               nota:
  *                 type: string
  *                 maxLength: 500
@@ -70,7 +67,7 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  *           application/json:
  *             schema: { $ref: '#/components/schemas/BrandAssetVersion' }
  *       400:
- *         description: Archivo vacío o adjunto ausente (validación Joi / multer)
+ *         description: Archivo vacío o adjunto ausente
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
@@ -82,7 +79,6 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  *         content:
  *           application/json:
  *             schema: { $ref: '#/components/schemas/Error' }
- *             example: { message: "El archivo supera el máximo de 10 MB." }
  *       415:
  *         description: Tipo de archivo no permitido para la categoría
  *         content:
@@ -152,7 +148,7 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  * /api/v1/brand-assets/{id}/versiones/{vid}/restaurar:
  *   post:
  *     summary: Restaura una versión antigua como activa
- *     description: Actualiza `version_activa_id` del archivo y devuelve el archivo actualizado.
+ *     description: Actualiza `version_activa_id` y devuelve el archivo actualizado.
  *     tags: [Brand Kit]
  *     parameters:
  *       - name: id
@@ -208,7 +204,7 @@ export { brandAssetRouter, brandColorRouter } from '../controllers/brandkit.cont
  * /api/v1/brand-assets/{id}:
  *   delete:
  *     summary: Elimina el archivo y todas sus versiones
- *     description: Borra los blobs del bucket, el historial de versiones y el registro del archivo.
+ *     description: Borra los blobs del bucket, el historial y el registro del archivo.
  *     tags: [Brand Kit]
  *     parameters:
  *       - name: id

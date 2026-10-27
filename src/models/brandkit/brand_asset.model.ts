@@ -28,6 +28,8 @@ export interface BrandAsset extends BaseModel<BrandAsset> {
   descripcion: string | null;
   /** Puntero a la versión activa (FK → brand_asset_versions). */
   version_activa_id: number | null;
+  /** Próximo número de versión; avanza incluso si se elimina una versión. */
+  siguiente_numero: number;
   empresa_id: number;
 }
 
