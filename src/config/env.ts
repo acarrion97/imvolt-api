@@ -90,14 +90,23 @@ export function validateEnv(env: Env): EnvReport {
   }
 
   const metaCreds = get('META_APP_ID') !== '' && get('META_APP_SECRET') !== '';
-  if (!isTrue(env.META_SIMULATE, true) && !metaCreds) {
-    errors.push('META_SIMULATE=false requiere META_APP_ID y META_APP_SECRET.');
+  const directMetaToken = get('META_ACCESS_TOKEN');
+  const directMetaAccount = get('META_AD_ACCOUNT_ID');
+  const directMetaCreds = directMetaToken !== '' && directMetaAccount !== '';
+  if ((directMetaToken === '') !== (directMetaAccount === '')) {
+    errors.push('META_ACCESS_TOKEN y META_AD_ACCOUNT_ID deben configurarse juntos para publicación directa.');
+  }
+  if (directMetaAccount && !/^act_[0-9]+$/.test(directMetaAccount)) {
+    errors.push('META_AD_ACCOUNT_ID debe tener formato act_<dígitos>.');
+  }
+  if (!isTrue(env.META_SIMULATE, true) && !metaCreds && !directMetaCreds) {
+    errors.push('META_SIMULATE=false requiere META_APP_ID/META_APP_SECRET para OAuth o META_ACCESS_TOKEN/META_AD_ACCOUNT_ID para prueba directa.');
   }
   const tokenEncryptionKey = get('META_TOKEN_ENCRYPTION_KEY');
   if (tokenEncryptionKey && !/^[a-f0-9]{64}$/i.test(tokenEncryptionKey)) {
     errors.push('META_TOKEN_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
-  } else if (!isTrue(env.META_SIMULATE, true) && !tokenEncryptionKey) {
-    errors.push('META_SIMULATE=false requiere META_TOKEN_ENCRYPTION_KEY para proteger los tokens OAuth.');
+  } else if (!isTrue(env.META_SIMULATE, true) && metaCreds && !tokenEncryptionKey) {
+    errors.push('META_TOKEN_ENCRYPTION_KEY es necesaria para proteger los tokens OAuth.');
   }
   const metaRedirectUri = get('META_OAUTH_REDIRECT_URI');
   if (metaRedirectUri) {
@@ -118,7 +127,7 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('META_API_VERSION debe tener la forma "v21.0".');
   }
 
-  if (prod && (higgsfieldSimulate || !metaCreds || isTrue(env.META_SIMULATE, true))) {
+  if (prod && (higgsfieldSimulate || (!metaCreds && !directMetaCreds) || isTrue(env.META_SIMULATE, true))) {
     warnings.push('Producción con Higgsfield o Meta en MODO SIMULADO: revisa HIGGSFIELD_* / META_*.');
   }
 

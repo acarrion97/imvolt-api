@@ -354,6 +354,23 @@ Meta debe aprobar los permisos `ads_management`, `ads_read` y
 o se revocan permisos, vuelve a conectar la cuenta. Las campañas se crean
 pausadas; la activación del gasto se hace en Meta Ads Manager.
 
+### Prueba directa con credenciales locales (sin OAuth)
+
+Para probar la publicación desde el listado sin importar ni conectar cuentas
+en la UI, configura en el `.env` local del backend:
+
+```env
+META_ACCESS_TOKEN=<token de usuario nuevo>
+META_AD_ACCOUNT_ID=act_<id numerico>
+META_SIMULATE=false
+```
+
+No escribas el token en el frontend, el código ni Git. Deja la campaña sin
+conexión seleccionada: la API usará estas variables directamente y no guardará
+el token en la base. Este modo es para desarrollo; para conectar cuentas de
+distintas empresas usa OAuth. El script SDK independiente también puede leer
+`CAMPAIGN_NAME` del `.env`.
+
 ### Publicar una campaña en Meta
 
 `POST /api/v1/campanias-publicitarias/:id/publicar` crea la campaña en Meta con el SDK
@@ -361,9 +378,9 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 `{ "validar_solo": true }` (Meta valida sin crear nada).
 
 - Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
-- Usa la conexión OAuth seleccionada en la campaña; el token se cifra en
-  `conexiones.access_token_enc` y nunca se devuelve al navegador.
-- Para publicación real: `META_SIMULATE=false`, `META_APP_ID`,
+- Usa la conexión OAuth seleccionada si existe; para pruebas sin conexión,
+  recurre a `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID` locales.
+- Para publicación OAuth: `META_SIMULATE=false`, `META_APP_ID`,
   `META_APP_SECRET`, `META_OAUTH_REDIRECT_URI` y `META_TOKEN_ENCRYPTION_KEY`.
 - Antes de desplegar ejecuta `database/migrations/2026-10-27_meta_campaign_publish.sql`
   (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`).

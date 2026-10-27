@@ -16,6 +16,8 @@ export const {
   HIGGSFIELD_SIMULATE = 'true',
   META_APP_ID = '',
   META_APP_SECRET = '',
+  META_ACCESS_TOKEN = '',
+  META_AD_ACCOUNT_ID = '',
   META_OAUTH_REDIRECT_URI = '',
   META_TOKEN_ENCRYPTION_KEY = '',
   META_API_VERSION = 'v21.0',
@@ -81,10 +83,12 @@ export const config = {
   meta: {
     appId: META_APP_ID,
     appSecret: META_APP_SECRET,
+    accessToken: META_ACCESS_TOKEN,
+    adAccountId: META_AD_ACCOUNT_ID,
     oauthRedirectUri: META_OAUTH_REDIRECT_URI,
     tokenEncryptionKey: META_TOKEN_ENCRYPTION_KEY,
     apiVersion: META_API_VERSION,
     /** Sin credenciales no se publica en Meta: se trabaja con borradores. */
-    simulate: asBool(META_SIMULATE, true) || META_APP_ID === '',
+    simulate: asBool(META_SIMULATE, true) || (META_APP_ID === '' && META_ACCESS_TOKEN === ''),
   },
 };

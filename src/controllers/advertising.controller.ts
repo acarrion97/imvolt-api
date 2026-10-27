@@ -295,6 +295,12 @@ export const { router: campaignRouter } = createCrudRouter({
 
 /** Token OAuth cifrado asociado a la cuenta publicitaria elegida en la campaña. */
 async function credencialesMeta(empresaId: string, conexionId: number | null): Promise<MetaCredentials | null> {
+  if (config.meta.accessToken && config.meta.adAccountId) {
+    return {
+      adAccountId: config.meta.adAccountId,
+      accessToken: config.meta.accessToken,
+    };
+  }
   if (!conexionId) return null;
   const { data, error } = await supabase
     .from('conexiones')
