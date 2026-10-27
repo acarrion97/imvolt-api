@@ -11,7 +11,7 @@
 //
 // El acceso posterior resuelve empresa y rol en `middlewares/sessionAuth`.
 
-import supabase, { supabaseAuthSession } from '../config/supabaseClient';
+import supabase, { createAuthClient } from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { Usuario } from '../models/identity/usuario.model';
 import { ORG_PERMISSIONS } from '../middlewares/requireRole';
@@ -140,7 +140,7 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
 
 export async function login(email: string, password: string): Promise<SessionResult> {
   // Cliente aislado: ver config/supabaseClient.ts (no contaminar el service client).
-  const { data, error } = await supabaseAuthSession.auth.signInWithPassword({ email, password });
+  const { data, error } = await createAuthClient().auth.signInWithPassword({ email, password });
 
   if (error || !data.session) {
     // Los intentos fallidos NO se registran en la bitácora: el email podría

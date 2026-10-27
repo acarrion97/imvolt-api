@@ -19,7 +19,8 @@
 
 import { NextFunction, Request, Response } from 'express';
 import supabase from '../config/supabaseClient';
-import { ORG_ROLES } from './requireRole';
+import { errorResponse } from '../core/errors';
+import { readOnly } from './requireRole';
 
 interface UsuarioRow {
   usuario_id: number;
@@ -54,7 +55,8 @@ export const sessionAuth = async (req: Request, res: Response, next: NextFunctio
     req.user = data.user as unknown as Record<string, unknown>;
     next();
   } catch (error) {
-    res.status(500).json({ message: error instanceof Error ? error.message : 'Error de autenticación' });
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
   }
 };
 
@@ -126,18 +128,10 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
       .map((asignacion) => asignacion.roles as unknown as RolConPermisos | null)
       .filter((rol): rol is RolConPermisos => Boolean(rol?.nombre) && rol?.estado !== 'inactivo');
 
-    const rolesReconocidos = rolesActivos.filter((rol) =>
-      ORG_ROLES.includes(rol.nombre as (typeof ORG_ROLES)[number])
-    );
-    if (rolesReconocidos.length === 0) {
-      res.status(403).json({ message: 'El usuario no tiene un rol activo autorizado' });
-      return;
-    }
-
-    const rol = rolesReconocidos[0]?.nombre;
+    const rol = rolesActivos[0]?.nombre;
 
     const permisos = new Set<string>();
-    for (const rolActivo of rolesReconocidos) {
+    for (const rolActivo of rolesActivos) {
       for (const vinculo of rolActivo.roles_permisos ?? []) {
         const permiso = (vinculo as { permisos?: { nombre?: string; estado?: string } | null }).permisos;
         if (permiso?.nombre && permiso.estado !== 'inactivo') permisos.add(permiso.nombre);
@@ -146,7 +140,7 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
 
     req.organizationId = empresaId;
     req.orgRole = rol;
-    req.orgRoles = rolesReconocidos
+    req.orgRoles = rolesActivos
       .map((rolActivo) => rolActivo.nombre)
       .filter((nombre): nombre is string => Boolean(nombre));
     req.permissions = [...permisos];
@@ -155,11 +149,15 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
     req.localUsuarioId = local.usuario_id;
     next();
   } catch (error) {
-    res.status(500).json({ message: error instanceof Error ? error.message : 'Error de contexto de empresa' });
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
   }
 };
 
 /**
- * Middlewares combinados usados por los routers CRUD: sesión + empresa.
+ * Middlewares combinados usados por los routers CRUD: sesión + empresa + al
+ * menos un rol activo. Sin esto, un usuario sin rol asignado podía LEER todo
+ * el tenant (las escrituras ya exigían rol). `/auth/me` usa solo
+ * `sessionAuth + orgContext` para que el frontend siga viendo el perfil vacío.
  */
-export const requireOrg = [sessionAuth, orgContext];
+export const requireOrg = [sessionAuth, orgContext, readOnly];

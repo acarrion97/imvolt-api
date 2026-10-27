@@ -106,6 +106,48 @@ Toda escritura del API deja traza en la bitácora `audit_logs`:
   lectura, acotado a la empresa del token y visible solo para `propietario` y
   `administrador`, con filtros `?tabla=&accion=&usuario_id=`.
 
+## Seguridad (HTTPS/TLS, secretos y mínimos privilegios)
+
+### HTTPS / TLS
+- El API **no termina TLS**: va detrás de un balanceador/proxy (Render, Fly, Nginx, Vercel…) que sí lo hace. Con `NODE_ENV=production`, `trust proxy` es `1` salto (ajústalo con `TRUST_PROXY`) y toda petición que no llegue por HTTPS (`X-Forwarded-Proto: https`) se rechaza: `GET/HEAD` se redirigen (308) a `PUBLIC_API_URL`; el resto responde `426`. `/api/health` queda exento para las sondas del balanceador. El proxy **debe** sobrescribir `X-Forwarded-Proto` (no reenviar el del cliente).
+- `helmet`: HSTS (2 años, `includeSubDomains`, `preload`), CSP `default-src 'none'`, `frame-ancestors 'none'`, `nosniff`, sin `X-Powered-By`. Swagger UI (`/documentacion`) lleva todas las cabeceras salvo la CSP. Las respuestas de `/api` llevan `Cache-Control: no-store`.
+- CORS: lista blanca exacta en `ALLOWED_ORIGIN` (el arranque falla con `*`, rutas o, en producción, orígenes sin `https`). `credentials` está deshabilitado: **la API no emite cookies**; la sesión viaja en `Authorization: Bearer`, por lo que no aplican `HttpOnly/Secure/SameSite` ni CSRF. Si se añaden cookies de sesión, deben ir `HttpOnly; Secure; SameSite=Lax|Strict` y habrá que activar `credentials` solo para los orígenes de la lista.
+- Rate limiting por IP: `POST /api/auth/login` (10 / 15 min) y `POST /api/auth/register` (5 / 15 min) → `429`.
+
+### Secretos
+- Al arrancar se validan las variables (`src/config/env.ts`) y el proceso **aborta** listando qué variable falla y por qué, sin imprimir valores. Siempre: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (forma de clave válida). En producción además: `SUPABASE_ANON_KEY`, `ALLOWED_ORIGIN` con `https`, y credenciales Higgsfield/Meta si se desactiva su simulación.
+- La **service role key** vive solo en `src/config/supabaseClient.ts` (DB, Storage y `auth.admin`, todo del lado servidor). El login usa la clave anon con un cliente nuevo por intento.
+- Los errores 5xx y los no controlados devuelven `{"message":"Error interno del servidor"}`; el detalle (mensajes de Supabase/PostgREST) solo se registra en el servidor. Las credenciales de integraciones se devuelven enmascaradas (`••••`) y la bitácora redacta claves/tokens.
+- `.env` y `.env.*` están en `.gitignore` (excepto `.env.example`, que no contiene valores reales). **Rota** cualquier clave que alguna vez se haya pegado en un chat, ticket o commit.
+
+### Mínimos privilegios
+- Toda ruta `/api/v1/*` exige sesión + empresa + al menos un rol activo (`requireOrg`). Lectura: cualquier rol; escritura: `propietario/administrador` (propiedades, proyectos, usuarios) o `+marketing` (creativo, campañas, leads, brand kit, media), y permiso fino donde aplica (`gestionar_usuarios`, `gestionar_integraciones`).
+- Aislamiento por empresa: todas las tablas con datos de cliente se acotan a la empresa de la sesión (listado, lectura, edición y borrado por id → `404` si es ajeno; fail-closed si el dueño no se puede resolver). `empresa_id` del body se ignora y se sobrescribe con el de la sesión; las FK enviadas (`propiedad_id`, `proyecto_id`, `configuracion_integracion_id`) deben pertenecer a la empresa.
+- Catálogos **globales** (roles, permisos, roles-permisos, hitos, tipos, formatos, plantillas, enfoques, objetivos): lectura para todos; escritura solo para los correos de `PLATFORM_ADMIN_EMAILS`.
+- Solo un `propietario` puede asignar/revocar el rol `propietario`.
+- Storage: buckets privados; la descarga devuelve **solo URL firmadas de 300 s**; subir, restaurar y borrar versiones exige rol de escritura.
+
+### Variables nuevas
+| Variable | Obligatoria | Descripción |
+|---|---|---|
+| `NODE_ENV` | — | `production` activa HTTPS obligatorio, validación estricta y docs cerradas |
+| `SUPABASE_ANON_KEY` | producción | Clave anon/publishable para el login |
+| `PUBLIC_API_URL` | recomendada | Origen https del API (destino del redirect 308 y `servers` de Swagger) |
+| `TRUST_PROXY` | — | Saltos de proxy de confianza (def. `1` en producción) |
+| `ENABLE_DOCS` | — | `true` abre `/documentacion` en producción |
+| `PLATFORM_ADMIN_EMAILS` | — | Correos que pueden escribir catálogos globales |
+| `AUTH_RATE_LIMIT_WINDOW_MINUTES` / `_LOGIN_MAX` / `_REGISTER_MAX` | — | Ventana y topes del rate limit |
+
+### Migración requerida
+Ejecuta `database/migrations/2026-10-26_tenant_hardening.sql` **antes** de desplegar: añade `empresa_id` a `contactos` y `configuraciones_integraciones`. Las filas que no puedan atribuirse a una empresa quedan invisibles hasta asignarlas a mano.
+
+### Cambios visibles para el frontend
+- `POST /api/v1/empresas` y `DELETE /api/v1/empresas/:id` → deshabilitados (404). Las empresas se crean en `/auth/register`.
+- Escritura en catálogos globales → `403` salvo `PLATFORM_ADMIN_EMAILS`.
+- Usuarios sin rol activo → `403` en `/api/v1/*` (`/api/auth/me` sigue respondiendo).
+- `contactos` y `configuraciones-integraciones` incluyen `empresa_id` (campo nuevo, aditivo). Integraciones exigen `gestionar_integraciones` también para leer.
+- `limite` se acota a 500; el JSON del body a 1 MB; errores 5xx con mensaje genérico; `429` en login/registro.
+
 ## Módulos y rutas
 
 | Módulo | Rutas | Contenido |
@@ -314,12 +356,13 @@ Salud del servicio: `GET /api/health`
   tanto la aplicación como la API mediante HTTPS. El proxy debe sobrescribir,
   no conservar, los encabezados `Forwarded` / `X-Forwarded-*` recibidos del
   cliente.
-- Define `NODE_ENV=production`, `TRUST_PROXY_HOPS` con el número exacto de
-  proxies confiables y `ALLOWED_ORIGIN` con los orígenes HTTPS del frontend.
-  La API exige al menos un salto confiable y rechaza solicitudes que Express
-  no reconozca como seguras. No expongas el puerto de Node directamente a
-  Internet: limita el acceso de red al proxy configurado, ya que la confianza
-  en encabezados reenviados depende de ello.
+- Define `NODE_ENV=production`, `TRUST_PROXY` con el número exacto de saltos
+  del proxy (por defecto `1` en producción) y `ALLOWED_ORIGIN` con los orígenes
+  HTTPS del frontend. Solo entonces Express confía en `X-Forwarded-Proto` /
+  `X-Forwarded-For` del proxy y rechaza con `426` las peticiones que no lleguen
+  por HTTPS. No expongas el puerto de Node directamente a Internet: limita el
+  acceso de red al proxy configurado, ya que la confianza en encabezados
+  reenviados depende de ello.
 - Inyecta `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y las demás credenciales
   desde el gestor de secretos del entorno de ejecución; no las guardes en el
   repositorio, imágenes, logs ni configuración del frontend. La clave service

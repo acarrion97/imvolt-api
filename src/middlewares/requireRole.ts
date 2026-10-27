@@ -9,6 +9,7 @@
 // por compatibilidad con las respuestas existentes.
 
 import { NextFunction, Request, Response } from 'express';
+import { config } from '../config/global';
 
 export const ORG_ROLES = ['propietario', 'administrador', 'marketing', 'agente', 'lector'] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
@@ -88,5 +89,23 @@ export const writeByOwnerOrAdmin = requireRole('propietario', 'administrador');
 /** Gestión de campañas, estudio y leads: agrega marketing. */
 export const writeByMarketing = requireRole('propietario', 'administrador', 'marketing');
 
+/** Credenciales de integraciones (Meta, Higgsfield…): permiso `gestionar_integraciones`. */
+export const manageIntegrations = requirePermission('gestionar_integraciones');
+
 /** Gestión del equipo: requiere el permiso `gestionar_usuarios`. */
 export const manageUsers = requirePermission('gestionar_usuarios');
+
+/**
+ * Escritura en catálogos GLOBALES (roles, permisos, roles_permisos, hitos,
+ * tipos, formatos, plantillas…): son compartidos por TODAS las empresas, así
+ * que un administrador de una empresa no debe poder modificarlos. Solo los
+ * correos de `PLATFORM_ADMIN_EMAILS` (vacío = nadie; se gestionan por semilla/SQL).
+ */
+export const writeByPlatformAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  const email = ((req.user as { email?: string } | undefined)?.email ?? '').toLowerCase();
+  if (!email || !config.platformAdmins.includes(email)) {
+    res.status(403).json({ message: 'Este catálogo es global y solo lo administra la plataforma.' });
+    return;
+  }
+  next();
+};

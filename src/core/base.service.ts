@@ -21,6 +21,8 @@ export interface GetAllOptions {
   joins?: string[];
   /** Filtros exactos (WHERE eq). */
   where?: Record<string, unknown>;
+  /** Filtros `IN` (columna → valores permitidos); un arreglo vacío no devuelve filas. */
+  whereIn?: Record<string, Array<string | number>>;
   /** Columna de ordenamiento. */
   orderBy?: string;
   ascending?: boolean;
@@ -154,6 +156,10 @@ export class BaseService<T = any> {
     Object.keys(where).forEach((key) => {
       query = query.eq(key, where[key] as never);
     });
+
+    for (const [key, values] of Object.entries(options.whereIn ?? {})) {
+      query = query.in(key, values as never);
+    }
 
     const orderColumn = orderBy ?? (columns[0] !== '*' ? columns[0] : this.primaryKey);
     query = query.order(orderColumn, { ascending });

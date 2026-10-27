@@ -19,12 +19,11 @@
 //                 /brand-colors
 
 import express from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
-import { config, validateRuntimeConfig } from './config/global';
+import { config } from './config/global';
 import authRoutes from './routes/auth.route';
 import {
   auditLogRouter,
@@ -53,41 +52,27 @@ import { contactoRouter } from './routes/leads.route';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
+import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
+import { errorResponse } from './core/errors';
 import { openapiComponents, openapiCrudPaths, openapiTags } from './docs';
 
 dotenv.config();
-validateRuntimeConfig();
 
 const app = express();
 
-// ── Middleware global ────────────────────────────────────────────────────────
+// ── Seguridad de transporte y cabeceras ─────────────────────────────────────
+// `trust proxy` hace que `req.secure`/`req.ip` reflejen X-Forwarded-* SOLO de
+// los saltos de confianza configurados (TRUST_PROXY); sin balanceador = false.
+app.set('trust proxy', config.trustProxy);
 app.disable('x-powered-by');
-app.set('trust proxy', config.trustProxyHops);
+app.use(requireHttps);
+app.use(securityHeaders);
+app.use(corsPolicy);
+app.use('/api', noStore);
 
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
-  );
-  res.setHeader('Cache-Control', 'no-store');
-
-  if (req.secure) {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
-  }
-
-  if (config.production && !req.secure) {
-    res.status(426).json({ message: 'HTTPS es obligatorio para acceder a esta API.' });
-    return;
-  }
-
-  next();
-});
-
-app.use(cors({ origin: config.allowedOrigin }));
-app.use(express.json({ limit: '10mb' }));
+// ── Middleware global ────────────────────────────────────────────────────────
+// 1 MB para JSON: las subidas de archivos van por multipart (multer, con sus límites).
+app.use(express.json({ limit: '1mb' }));
 
 // ── Salud del servicio ──────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
@@ -172,7 +157,9 @@ const swaggerOptions: swaggerJsdoc.Options = {
       contact: { name: 'Soporte IMVOLT', email: 'soporte@imvolt.ec' },
     },
     servers: [
-      { url: `http://localhost:${config.port}`, description: 'Desarrollo local' },
+      config.publicApiUrl
+        ? { url: config.publicApiUrl, description: 'API publicada (HTTPS)' }
+        : { url: `http://localhost:${config.port}`, description: 'Desarrollo local' },
     ],
     tags: openapiTags,
     components: openapiComponents,
@@ -203,12 +190,27 @@ const swaggerUiOptions: swaggerUi.SwaggerUiOptions = {
   `,
 };
 
-app.use('/documentacion', swaggerUi.serve, swaggerUi.setup(spec, swaggerUiOptions));
+// En producción la documentación queda cerrada salvo ENABLE_DOCS=true.
+if (config.enableDocs) {
+  app.use('/documentacion', swaggerUi.serve, swaggerUi.setup(spec, swaggerUiOptions));
+}
+
+// ── Errores no capturados (JSON mal formado, cuerpo excedido, etc.) ─────────
+// Sin esto Express responde con HTML y, fuera de producción, con la traza.
+app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = (error as { status?: number; statusCode?: number })?.status ?? (error as { statusCode?: number })?.statusCode;
+  if (status && status >= 400 && status < 500) {
+    res.status(status).json({ message: status === 413 ? 'El cuerpo de la petición es demasiado grande' : 'Petición inválida' });
+    return;
+  }
+  const { status: code, body } = errorResponse(error);
+  res.status(code).json(body);
+});
 
 // ── Arranque ────────────────────────────────────────────────────────────────
 app.listen(config.port, () => {
-  console.log(`IMVOLT API escuchando en el puerto ${config.port}`);
-  console.log(`Documentación disponible en /documentacion`);
+  console.log(`IMVOLT API escuchando en http://localhost:${config.port}`);
+  if (config.enableDocs) console.log(`Documentación: http://localhost:${config.port}/documentacion`);
   if (config.higgsfield.simulate) console.log('Higgsfield: MODO SIMULADO (sin API key)');
   if (config.meta.simulate) console.log('Meta: MODO SIMULADO (sin credenciales; solo borradores)');
   // Bucket privado del Brand Kit: lo crea/ajusta (10 MB + MIME) sin bloquear el arranque.

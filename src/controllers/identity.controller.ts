@@ -42,16 +42,18 @@ import {
   usuarioRolResource,
 } from '../resources/identity.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { assignEmpresaOnCreate, filterByEmpresa } from '../middlewares/tenantScope';
-import { manageUsers, writeByOwnerOrAdmin } from '../middlewares/requireRole';
+import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
+import { manageIntegrations, manageUsers, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { Rol } from '../models/identity/rol.model';
 import { UsuarioView } from '../models/identity/usuario.model';
 import { UsuarioRolView } from '../models/identity/usuario_rol.model';
-import { asegurarPropietarioRestante, invitarMiembro, rolValido } from '../services/miembros.service';
+import { asegurarPropietarioRestante, exigirPropietarioParaRol, invitarMiembro, rolValido } from '../services/miembros.service';
 
-const SEGMENTO = {
+// Escritura en catálogos GLOBALES (roles, permisos, hitos…): compartidos por todas
+// las empresas, solo los administra la plataforma (`PLATFORM_ADMIN_EMAILS`).
+const CATALOGO_GLOBAL = {
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByOwnerOrAdmin],
+  writeMiddlewares: [writeByPlatformAdmin],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 };
 
@@ -62,12 +64,16 @@ export const { router: empresaRouter } = createCrudRouter({
   request: empresaRequest,
   resource: empresaResource,
   entityName: 'Empresa',
-  ...SEGMENTO,
+  writeMiddlewares: [writeByOwnerOrAdmin],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   // La empresa ES el propio tenant: el listado se acota a la de la sesión y
   // cada lectura/escritura por id exige que coincida con `empresa_id` activo.
   // Sin esto, cualquier cuenta autenticada podía listar y editar empresas
   // ajenas (GET /empresas devolvía todas las cuentas de la plataforma).
   middlewares: [...requireOrg, filterByEmpresa],
+  // Las empresas nacen en POST /auth/register; crear otra por aquí dejaba un
+  // tenant huérfano y borrarla (ON DELETE CASCADE) destruía todos sus datos.
+  disabled: ['create', 'remove'],
   tenantScoped: true,
   tenantColumn: 'empresa_id',
 });
@@ -143,6 +149,7 @@ const eliminarUsuario: RequestHandler = async (req: Request, res: Response) => {
 const invitarHandler: RequestHandler = async (req: Request, res: Response) => {
   try {
     const input = invitacionRequest.validateCreate(req.body);
+    exigirPropietarioParaRol(req.orgRoles, input.rol);
 
     const resultado = await invitarMiembro(input, {
       authUserId: req.userId,
@@ -166,8 +173,11 @@ export const { router: usuarioRouter } = createCrudRouter<UsuarioView>({
   resource: usuarioResource,
   entityName: 'Usuario',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, manageUsers, assignEmpresaOnCreate],
+  writeMiddlewares: [writeByOwnerOrAdmin, manageUsers, forceEmpresa],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  // Sin esto GET/PATCH/DELETE /usuarios/:id operaban sobre usuarios de OTRAS empresas.
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
   handlers: { update: actualizarUsuario, remove: eliminarUsuario },
   extraRoutes: (router) => {
     router.post('/invitaciones', ...requireOrg, writeByOwnerOrAdmin, manageUsers, invitarHandler);
@@ -181,7 +191,7 @@ export const { router: rolRouter } = createCrudRouter({
   request: rolRequest,
   resource: rolResource,
   entityName: 'Rol',
-  ...SEGMENTO,
+  ...CATALOGO_GLOBAL,
 });
 
 // ── Permisos ────────────────────────────────────────────────────────────────
@@ -191,7 +201,7 @@ export const { router: permisoRouter } = createCrudRouter({
   request: permisoRequest,
   resource: permisoResource,
   entityName: 'Permiso',
-  ...SEGMENTO,
+  ...CATALOGO_GLOBAL,
 });
 
 // ── Roles ↔ Usuarios (membresía: qué rol tiene cada miembro) ───────────────
@@ -269,7 +279,7 @@ const asignarRol: RequestHandler = async (req: Request, res: Response) => {
   try {
     const payload = usuarioRolRequest.validateCreate(req.body);
     await usuarioDeLaEmpresa(req, payload.usuario_id);
-    await validarRol(payload.rol_id);
+    exigirPropietarioParaRol(req.orgRoles, (await validarRol(payload.rol_id)).nombre);
     await asignacionPrevia(payload.usuario_id, payload.rol_id);
 
     const row = await asignacionService.create(payload, auditContext(req));
@@ -288,7 +298,7 @@ const cambiarAsignacion: RequestHandler = async (req: Request, res: Response) =>
 
     if (empresaDe(antes) !== req.organizationId) throw new NotFoundError('Asignación de rol');
     if (payload.usuario_id !== undefined) await usuarioDeLaEmpresa(req, payload.usuario_id);
-    if (payload.rol_id !== undefined) await validarRol(payload.rol_id);
+    if (payload.rol_id !== undefined) exigirPropietarioParaRol(req.orgRoles, (await validarRol(payload.rol_id)).nombre);
 
     await asignacionPrevia(
       payload.usuario_id ?? Number(antes.usuario_id),
@@ -321,6 +331,7 @@ const revocarRol: RequestHandler = async (req: Request, res: Response) => {
 
     if (empresaDe(antes) !== req.organizationId) throw new NotFoundError('Asignación de rol');
     if ((antes.roles as unknown as Rol | null)?.nombre === 'propietario') {
+      exigirPropietarioParaRol(req.orgRoles, 'propietario');
       await asegurarPropietarioRestante(req.organizationId, { asignacionId: id });
     }
 
@@ -365,7 +376,7 @@ export const { router: rolPermisoRouter } = createCrudRouter({
   request: rolPermisoRequest,
   resource: rolPermisoResource,
   entityName: 'Permiso de rol',
-  ...SEGMENTO,
+  ...CATALOGO_GLOBAL,
 });
 
 // ── Hitos de lanzamiento ────────────────────────────────────────────────────
@@ -375,7 +386,7 @@ export const { router: hitoLanzamientoRouter } = createCrudRouter({
   request: hitoLanzamientoRequest,
   resource: hitoLanzamientoResource,
   entityName: 'Hito de lanzamiento',
-  ...SEGMENTO,
+  ...CATALOGO_GLOBAL,
 });
 
 // ── Hitos por empresa ───────────────────────────────────────────────────────
@@ -386,7 +397,11 @@ export const { router: empresaHitoRouter } = createCrudRouter({
   request: empresaHitoRequest,
   resource: empresaHitoResource,
   entityName: 'Hito de la empresa',
-  ...SEGMENTO,
+  middlewares: [...requireOrg, filterByEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, forceEmpresa],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });
 
 // ── Configuración de integración ────────────────────────────────────────────
@@ -396,7 +411,13 @@ export const { router: configuracionIntegracionRouter } = createCrudRouter({
   request: configuracionIntegracionRequest,
   resource: configuracionIntegracionResource,
   entityName: 'Configuración de integración',
-  ...SEGMENTO,
+  // Guarda credenciales de terceros: acotada a la empresa dueña (columna
+  // `empresa_id`, ver database/migrations) y solo con `gestionar_integraciones`.
+  middlewares: [...requireOrg, manageIntegrations, filterByEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, forceEmpresa],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });
 
 // ── Integraciones por empresa ───────────────────────────────────────────────
@@ -407,7 +428,15 @@ export const { router: empresaIntegracionRouter } = createCrudRouter({
   request: empresaIntegracionRequest,
   resource: empresaIntegracionResource,
   entityName: 'Integración de la empresa',
-  ...SEGMENTO,
+  middlewares: [...requireOrg, manageIntegrations, filterByEmpresa],
+  writeMiddlewares: [
+    writeByOwnerOrAdmin,
+    forceEmpresa,
+    requireOwnedRef('configuracion_integracion_id', 'configuraciones_integraciones', 'configuracion_integracion_id'),
+  ],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });
 
 // ── Auditoría (SOLO LECTURA) ────────────────────────────────────────────────
@@ -423,4 +452,6 @@ export const { router: auditLogRouter } = createCrudRouter({
   middlewares: [...requireOrg, filterByEmpresa, writeByOwnerOrAdmin],
   disabled: ['create', 'update', 'remove'],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });
