@@ -7,11 +7,22 @@ import { createCrudRouter } from '../core/crud.factory';
 import { errorResponse, HttpError, NotFoundError, ValidationError } from '../core/errors';
 import { logAudit } from '../services/audit.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
-import { campaniaPublicitariaRequest, objetivoPublicidadRequest } from '../requests/advertising.request';
-import { campaniaPublicitariaResource, objetivoPublicidadResource } from '../resources/advertising.resource';
+import {
+  campaignRequest,
+  campaniaPublicitariaRequest,
+  conexionRequest,
+  objetivoPublicidadRequest,
+} from '../requests/advertising.request';
+import {
+  campaignResource,
+  campaniaPublicitariaResource,
+  conexionResource,
+  objetivoPublicidadResource,
+} from '../resources/advertising.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { requirePermission, writeByMarketing, writeByPlatformAdmin } from '../middlewares/requireRole';
-import { requireOwnedRef } from '../middlewares/tenantScope';
+import { manageIntegrations, requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
+import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
+import { resolveField, translateBody, translateQuery } from '../middlewares/contract';
 
 // Catálogo GLOBAL de objetivos: escritura solo de la plataforma.
 const SEGMENTO = {
@@ -28,6 +39,74 @@ export const { router: objetivoPublicidadRouter } = createCrudRouter({
   resource: objetivoPublicidadResource,
   entityName: 'Objetivo de publicidad',
   ...SEGMENTO,
+});
+
+// ── Conexiones de cuentas publicitarias ────────────────────────────────────
+export const { router: conexionRouter } = createCrudRouter({
+  table: 'conexiones',
+  primaryKey: 'conexion_id',
+  request: conexionRequest,
+  resource: conexionResource,
+  entityName: 'Conexión',
+  middlewares: [...requireOrg, filterByEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, manageIntegrations, forceEmpresa],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
+});
+
+const slugObjetivo = (value: string): string => value
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/\s+/g, '_');
+
+const objetivoIds = new Map<string, number>();
+
+async function resolverObjetivo(value: unknown): Promise<number> {
+  const slug = slugObjetivo(String(value));
+  const cached = objetivoIds.get(slug);
+  if (cached) return cached;
+
+  const { data, error } = await supabase.from('objetivo_publicidad').select('objetivo_publicidad_id, nombre');
+  if (error) throw new Error(error.message);
+  const objetivo = (data ?? []).find((row) => slugObjetivo(row.nombre) === slug);
+  if (!objetivo) throw new ValidationError('Objetivo de campaña inválido', [
+    { field: 'objetivo', message: 'Selecciona un objetivo disponible.' },
+  ]);
+  objetivoIds.set(slug, objetivo.objetivo_publicidad_id);
+  return objetivo.objetivo_publicidad_id;
+}
+
+const campaignFields = {
+  property_id: 'propiedad_id',
+  connection_id: 'conexion_id',
+  estado: 'estado_flujo',
+  presupuesto_maximo: 'presupuesto_diario',
+  copy: 'copy_anuncio',
+};
+
+// ── Campaigns: contrato inglés del frontend sobre campanias_publicitarias ──
+export const { router: campaignRouter } = createCrudRouter({
+  table: 'campanias_publicitarias',
+  primaryKey: 'campania_publicitaria_id',
+  joins: ['objetivo_publicidad(*)'],
+  request: campaignRequest,
+  resource: campaignResource,
+  entityName: 'Campaña',
+  middlewares: [...requireOrg, filterByEmpresa, translateQuery(campaignFields)],
+  writeMiddlewares: [
+    writeByMarketing,
+    requirePermission('gestionar_campanas'),
+    translateBody(campaignFields),
+    resolveField('objetivo', 'objetivo_publicidad_id', (value) => resolverObjetivo(value)),
+    forceEmpresa,
+    requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id'),
+    requireOwnedRef('conexion_id', 'conexiones', 'conexion_id'),
+  ],
+  defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
+  tenantScoped: true,
+  tenantColumn: 'empresa_id',
 });
 
 // ── Publicación en Meta ─────────────────────────────────────────────────────
@@ -116,7 +195,12 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
 
     const { error: errGuardar } = await supabase
       .from('campanias_publicitarias')
-      .update({ meta_campaign_id: r.meta_campaign_id, meta_estado: 'published_paused', publicada_en: new Date().toISOString() })
+      .update({
+        meta_campaign_id: r.meta_campaign_id,
+        meta_estado: 'published_paused',
+        estado_flujo: 'published_paused',
+        publicada_en: new Date().toISOString(),
+      })
       .eq('campania_publicitaria_id', id);
     if (errGuardar) {
       // La campaña YA existe en Meta (pausada): no se libera la reserva para no duplicarla.

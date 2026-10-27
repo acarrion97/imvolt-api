@@ -2,7 +2,12 @@
 // Routers del módulo Publicidad (IMVOLT Ads).
 // Documentación OpenAPI generada desde `src/docs`.
 
-export { campaniaPublicitariaRouter, objetivoPublicidadRouter } from '../controllers/advertising.controller';
+export {
+  campaignRouter,
+  campaniaPublicitariaRouter,
+  conexionRouter,
+  objetivoPublicidadRouter,
+} from '../controllers/advertising.controller';
 
 /**
  * @swagger

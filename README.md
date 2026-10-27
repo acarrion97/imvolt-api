@@ -283,38 +283,44 @@ Brand Kit:
   `empresa_id` en escritura (`empresaEnEscritura`), con `tenantScoped` para
   responder 404 ante registros ajenos. Auditoría en todas las escrituras.
 
-### Flujo de generación IA (§09) — adaptadores listos, endpoints pendientes
+### Generación IA (§09) — catálogo y endpoints REST
 
-El módulo CRUD `contenidos_ia` ya está publicado. El flujo de ejecución con
-Higgsfield vive en `src/services/higgsfield.service.ts` (modo simulado sin API
-key) y se expondrá como endpoints de negocio sobre la misma base:
-
-```
-POST /creative/generations
-  1. cotiza (higgsfieldService.quote)
-  2. crea el job            → status: created
-  3. reserva créditos       → status: credits_reserved   (ledger, idempotente)
-  4. envía al proveedor     → status: queued
-GET  /creative/generations/:id     (polling: procesa resultado y concilia créditos)
-POST /creative/generations/:id/cancel  (elegible → devuelve créditos)
-```
-
-### Flujo de campaña Meta (§10) — adaptador listo, endpoints pendientes
-
-`src/services/meta.service.ts` implementa borrador → validación → aprobación →
-publicación PAUSED → insights en modo simulado sin credenciales:
+El catálogo se sirve en `GET /api/v1/modelos`; las generaciones se persisten en
+`generaciones` y se exponen en `GET/POST /api/v1/creative/generations`. El API
+calcula el costo desde el catálogo, valida propiedad/modelo, carga los créditos
+y conserva el identificador de proveedor:
 
 ```
-POST /campaigns                    → local_draft
-POST /campaigns/:id/validate       → validated   (incluye reglas de vivienda)
-POST /campaigns/:id/approve        → approved    (solo propietario/administrador)
-POST /campaigns/:id/publish        → published_paused (recursos en PAUSED)
-GET  /campaigns/:id/insights       → gasto, impresiones, clics, leads, CPL, CTR
-GET  /campaigns/:id/export         → paquete manual mientras los permisos no estén listos
+POST /api/v1/creative/generations      → cotiza, cobra y encola (o completa en simulación)
+GET  /api/v1/creative/generations/:id  → consulta/persiste el estado del proveedor
 ```
 
-Cualquier cambio en presupuesto, destino, objetivo o creativo **invalida la
-aprobación** y devuelve la campaña a `local_draft`.
+En simulación devuelve una generación completada con costo registrado. Con un
+proveedor real, `GET` consulta el estado y devuelve los créditos si el job falla.
+
+### Contratos REST de campañas y leads
+
+Para `VITE_DATA_PROVIDER=rest`, `/api/v1/campaigns` y `/api/v1/leads` traducen
+los nombres del frontend sobre `campanias_publicitarias` y `contactos`; no
+duplican esas entidades. El CRUD heredado `/campanias-publicitarias` y
+`/contactos` conserva su contrato del diagrama.
+
+```
+GET/POST/PATCH/DELETE /api/v1/campaigns
+GET/POST/PATCH/DELETE /api/v1/leads
+GET/POST/DELETE       /api/v1/conexiones
+```
+
+El CRUD de campaña REST no sustituye el endpoint de publicación en Meta, que
+permanece en `/api/v1/campanias-publicitarias/:id/publicar`.
+
+### Créditos (§16)
+
+- `GET /api/v1/billing/wallet`, `GET /api/v1/billing/transactions` y
+  `POST /api/v1/billing/recharge` sirven el saldo y el ledger de la empresa.
+- La primera wallet recibe 25 créditos de bienvenida, con movimiento
+  idempotente. La recarga es un stub y no representa un cobro real.
+- Los movimientos de transacciones son de solo lectura para el cliente.
 
 ## Proveedores en modo simulado
 
@@ -347,14 +353,19 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 cp .env.example .env      # en Windows: copy .env.example .env
 npm install
 
-# 1. Ejecuta database/schema.sql en el SQL Editor de Supabase
-#    (28 tablas del diagrama + buckets privados `brand-kit` y `media-assets` +
-#    RLS denegado por defecto + semillas de roles, permisos, tipos de
-#    propiedad, plantillas, formatos, enfoques, objetivos, hitos e integraciones)
-#    Si propiedades ya existe y el API reporta que no hay relación con
-#    proyectos, ejecuta database/migrations/20261026_add_propiedades_proyecto_fk.sql.
-#    La migración añade la FK faltante y solicita recargar la caché de PostgREST.
-# 2. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env
+# 1. Ejecuta database/schema.sql (esquema base, RLS y semillas).
+# 2. Ejecuta estas migraciones, en orden, para habilitar contratos REST
+#    justificados por el Documento Maestro:
+#      migrations/2026-10-27_01_ai_connections.sql
+#      migrations/2026-10-27_02_campaign_lead_contract.sql
+#      migrations/2026-10-27_03_credit_ledger.sql
+#      migrations/2026-10-27_04_campaign_tenant_backfill.sql
+#      migrations/2026-10-27_meta_campaign_publish.sql (publicación Meta)
+#    Las campañas y leads reutilizan las tablas existentes; no se crean tablas
+#    duplicadas para esos recursos.
+#    Si propiedades ya existe y falta su FK a proyectos, ejecuta
+#    migrations/20261026_add_propiedades_proyecto_fk.sql.
+# 3. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env
 
 npm run dev               # desarrollo (ts-node)
 npm run build             # compila a dist/
@@ -456,8 +467,10 @@ Para agregar un recurso al documento solo hay que añadir su esquema en
 5. `src/routes/<dominio>.route.ts` → exporta los routers y `src/index.ts` los monta.
 6. Documentación: esquema en `src/docs/schemas.ts` (+ `relations` si tiene FK) y
    módulo en `src/docs/index.ts` (genera las 6 operaciones con ejemplos).
-7. Tabla e índices en `database/schema.sql` (agregarla a la lista del bloque
-   `do $$ ... $$` de RLS).
+7. Para entidades del modelo base, define la tabla e índices en
+   `database/schema.sql` y agrégala a RLS. Para extensiones de contratos o
+   capacidades del Documento Maestro, usa una migración idempotente y pequeña
+   en `database/migrations/`, sin duplicar entidades existentes.
 
 ## Contexto de marca
 

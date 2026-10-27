@@ -6,11 +6,6 @@
 // Todas las operaciones son idempotentes vía `idempotency_key`: un mismo
 // evento de proveedor no puede facturarse dos veces.
 
-// NOTA: DESHABILITADO — las tablas `credit_wallets` y `credit_transactions`
-// fueron retiradas de database/schema.sql al alinear la base con el diagrama
-// relacional. El servicio compila, pero hay que rehacer el modelo de créditos
-// antes de volver a exponerlo.
-
 import supabase from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { CreditTransaction, CreditWallet, TipoMovimiento } from '../models/commerce/credits.model';
@@ -30,11 +25,43 @@ export async function getWallet(organizationId: string): Promise<CreditWallet> {
 
   const { data: created, error: createError } = await supabase
     .from('credit_wallets')
-    .insert([{ organization_id: organizationId, saldo: 0, moneda: 'USD' }])
+    .insert([{ organization_id: organizationId, saldo: WELCOME_CREDITS, moneda: 'USD' }])
     .select()
-    .single();
+    .maybeSingle();
 
-  if (createError) throw new Error(`Error al crear la wallet: ${createError.message}`);
+  if (createError) {
+    // Dos peticiones simultáneas pueden intentar inicializar la misma empresa.
+    if (createError.code !== '23505') throw new Error(`Error al crear la wallet: ${createError.message}`);
+    const { data: raced, error: racedError } = await supabase
+      .from('credit_wallets')
+      .select('*')
+      .eq('organization_id', organizationId)
+      .maybeSingle();
+    if (racedError) throw new Error(`Error al recuperar la wallet: ${racedError.message}`);
+    if (!raced) throw new Error('No fue posible recuperar la wallet creada en paralelo');
+    return raced as CreditWallet;
+  }
+  if (!created) throw new Error('No fue posible crear la wallet de créditos');
+
+  if (WELCOME_CREDITS > 0) {
+    const { error: welcomeError } = await supabase.from('credit_transactions').insert([{
+      wallet_id: created.wallet_id,
+      organization_id: organizationId,
+      tipo: 'recarga',
+      monto: WELCOME_CREDITS,
+      descripcion: 'Créditos de bienvenida IMVOLT',
+      idempotency_key: `welcome:${organizationId}`,
+    }]);
+    if (welcomeError) {
+      const { data: welcome, error: lookupError } = await supabase
+        .from('credit_transactions')
+        .select('transaction_id')
+        .eq('idempotency_key', `welcome:${organizationId}`)
+        .maybeSingle();
+      if (lookupError) throw new Error(`Error al verificar créditos de bienvenida: ${lookupError.message}`);
+      if (!welcome) throw new Error(`Error al registrar créditos de bienvenida: ${welcomeError.message}`);
+    }
+  }
   return created as CreditWallet;
 }
 
@@ -62,28 +89,29 @@ async function applyMovement(
     }
   }
 
-  const nuevoSaldo = wallet.saldo + monto;
-  if (nuevoSaldo < 0) {
-    throw new HttpError(402, 'Créditos insuficientes para esta operación', {
-      saldo: wallet.saldo,
-      requerido: Math.abs(monto),
-    });
-  }
-
   // Actualización optimista: solo aplica si el saldo no cambió entre lectura
   // y escritura; ante colisión se reintenta una vez.
+  let currentWallet = wallet;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    const nuevoSaldo = currentWallet.saldo + monto;
+    if (nuevoSaldo < 0) {
+      throw new HttpError(402, 'Créditos insuficientes para esta operación', {
+        saldo: currentWallet.saldo,
+        requerido: Math.abs(monto),
+      });
+    }
+
     const { data: updated, error: updateError } = await supabase
       .from('credit_wallets')
       .update({ saldo: nuevoSaldo, updated_at: new Date().toISOString() })
-      .eq('wallet_id', wallet.wallet_id)
-      .eq('saldo', wallet.saldo)
+      .eq('wallet_id', currentWallet.wallet_id)
+      .eq('saldo', currentWallet.saldo)
       .select()
       .maybeSingle();
 
     if (updateError) throw new Error(`Error al actualizar la wallet: ${updateError.message}`);
     if (!updated) {
-      wallet.saldo = (await getWallet(organizationId)).saldo;
+      currentWallet = await getWallet(organizationId);
       continue;
     }
 
@@ -91,7 +119,7 @@ async function applyMovement(
       .from('credit_transactions')
       .insert([
         {
-          wallet_id: wallet.wallet_id,
+          wallet_id: currentWallet.wallet_id,
           organization_id: organizationId,
           tipo,
           monto,
@@ -103,7 +131,17 @@ async function applyMovement(
       .select()
       .single();
 
-    if (txError) throw new Error(`Error al registrar el movimiento: ${txError.message}`);
+    if (txError) {
+      const { error: rollbackError } = await supabase
+        .from('credit_wallets')
+        .update({ saldo: currentWallet.saldo, updated_at: new Date().toISOString() })
+        .eq('wallet_id', currentWallet.wallet_id)
+        .eq('saldo', nuevoSaldo);
+      if (rollbackError) {
+        throw new Error(`No se pudo registrar el movimiento ni revertir el saldo: ${txError.message}; ${rollbackError.message}`);
+      }
+      throw new Error(`Error al registrar el movimiento: ${txError.message}`);
+    }
     return { wallet: updated as CreditWallet, transaction: transaction as CreditTransaction };
   }
 

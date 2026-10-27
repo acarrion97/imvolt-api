@@ -6,6 +6,8 @@ export {
   contenidoIaRouter,
   enfoqueComercialRouter,
   formatoRouter,
+  generacionRouter,
+  modeloRouter,
   plantillaRouter,
   tipoPlantillaRouter,
 } from '../controllers/creative.controller';

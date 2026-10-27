@@ -1,5 +1,6 @@
 // docs/schemas.ts
-// Esquemas OpenAPI de las 28 entidades del diagrama relacional.
+// Esquemas OpenAPI de las entidades del diagrama relacional y los contratos
+// REST del frontend definidos por el Documento Maestro.
 //
 // Por cada entidad se generan DOS esquemas:
 //
@@ -600,5 +601,182 @@ definitions.forEach((def) => {
   });
 });
 
+const stringId = (description: string): Prop => ({ type: 'string', example: '1', description });
+const contractSchema = (properties: Prop, required: string[], example: Record<string, unknown>, description: string) => ({
+  type: 'object',
+  description,
+  properties,
+  required,
+  example,
+});
+
+Object.assign(openapiSchemas, {
+  Conexion: contractSchema({
+    connection_id: stringId('ID de conexión'),
+    organization_id: stringId('ID de la empresa'),
+    cuenta_publicitaria_id: { type: 'string', example: 'act_1234567890' },
+    nombre_cuenta: { type: 'string', example: 'IMVOLT Ads' },
+    estado: { type: 'string', enum: ['pendiente', 'conectada', 'revocada'] },
+    permisos: { type: 'object', nullable: true },
+    created_at: ts('Fecha de creación'),
+  }, ['connection_id', 'organization_id', 'cuenta_publicitaria_id', 'nombre_cuenta', 'estado', 'created_at'], {
+    connection_id: '1', organization_id: '1', cuenta_publicitaria_id: 'act_1234567890',
+    nombre_cuenta: 'IMVOLT Ads', estado: 'conectada', permisos: null, created_at: '2026-03-06T09:00:00.000Z',
+  }, 'Conexión de cuenta publicitaria de la empresa'),
+  ConexionInput: contractSchema({
+    cuenta_publicitaria_id: { type: 'string' },
+    nombre_cuenta: { type: 'string' },
+    estado: { type: 'string', enum: ['pendiente', 'conectada', 'revocada'] },
+    permisos: { type: 'object', nullable: true },
+  }, ['cuenta_publicitaria_id', 'nombre_cuenta'], {
+    cuenta_publicitaria_id: 'act_1234567890', nombre_cuenta: 'IMVOLT Ads',
+  }, 'Datos de conexión'),
+  Campaign: contractSchema({
+    campaign_id: stringId('ID de campaña'),
+    organization_id: stringId('ID de empresa'),
+    connection_id: stringId('ID de conexión Meta'),
+    property_id: stringId('ID de propiedad'),
+    nombre: { type: 'string' },
+    objetivo: { type: 'string', enum: ['mensajes', 'formularios', 'visitas', 'trafico', 'branding'] },
+    destino: { type: 'string', enum: ['whatsapp', 'formulario', 'landing'] },
+    estado: { type: 'string', enum: ['local_draft', 'validated', 'awaiting_approval', 'approved', 'published_paused', 'active', 'rejected', 'failed', 'archived'] },
+    presupuesto_maximo: { type: 'number' },
+    moneda: { type: 'string' },
+    fecha_inicio: { type: 'string', nullable: true, format: 'date-time' },
+    fecha_fin: { type: 'string', nullable: true, format: 'date-time' },
+    titulo: { type: 'string', nullable: true },
+    copy: { type: 'string', nullable: true },
+    cta: { type: 'string', nullable: true },
+    creative_url: { type: 'string', nullable: true },
+    meta_campaign_id: { type: 'string', nullable: true },
+    created_at: ts('Fecha de creación'),
+    updated_at: ts('Última modificación'),
+  }, ['campaign_id', 'organization_id', 'nombre', 'objetivo', 'destino', 'estado', 'presupuesto_maximo', 'moneda', 'created_at', 'updated_at'], {
+    campaign_id: '5', organization_id: '1', connection_id: '2', property_id: '3', nombre: 'Lanzamiento Aurora',
+    objetivo: 'mensajes', destino: 'whatsapp', estado: 'local_draft', presupuesto_maximo: 15, moneda: 'USD',
+    fecha_inicio: null, fecha_fin: null, titulo: 'Conoce Aurora', copy: 'Agenda tu visita hoy.',
+    cta: 'Enviar mensaje', creative_url: null, meta_campaign_id: null,
+    created_at: '2026-03-06T10:30:00.000Z', updated_at: '2026-03-06T10:30:00.000Z',
+  }, 'Contrato REST de campaña, traducido sobre campanias_publicitarias'),
+  CampaignInput: contractSchema({
+    nombre: { type: 'string' }, property_id: stringId('ID de propiedad'), connection_id: stringId('ID de conexión'),
+    objetivo: { type: 'string', enum: ['mensajes', 'formularios', 'visitas', 'trafico', 'branding'] },
+    destino: { type: 'string', enum: ['whatsapp', 'formulario', 'landing'] },
+    presupuesto_maximo: { type: 'number' }, moneda: { type: 'string' }, estado: { type: 'string' },
+    fecha_inicio: { type: 'string', nullable: true }, fecha_fin: { type: 'string', nullable: true },
+    titulo: { type: 'string', nullable: true }, copy: { type: 'string' }, cta: { type: 'string', nullable: true },
+    creative_url: { type: 'string', nullable: true },
+  }, ['nombre', 'objetivo', 'presupuesto_maximo', 'copy'], {
+    nombre: 'Lanzamiento Aurora', property_id: '3', connection_id: '2', objetivo: 'mensajes',
+    destino: 'whatsapp', presupuesto_maximo: 15, moneda: 'USD', copy: 'Agenda tu visita hoy.',
+  }, 'Payload de campaña'),
+  Lead: contractSchema({
+    lead_id: stringId('ID del lead'),
+    organization_id: stringId('ID de empresa'),
+    campaign_id: stringId('ID de campaña'),
+    property_id: stringId('ID de propiedad'),
+    nombre: { type: 'string' },
+    email: { type: 'string', nullable: true, format: 'email' },
+    telefono: { type: 'string', nullable: true },
+    fuente: { type: 'string', enum: ['meta_formulario', 'whatsapp', 'landing', 'manual', 'lotes_al_mando'] },
+    estado: { type: 'string', enum: ['nuevo', 'contactado', 'calificado', 'visitado', 'cerrado', 'perdido'] },
+    notas: { type: 'string', nullable: true },
+    provider_lead_id: { type: 'string', nullable: true },
+    created_at: ts('Fecha de creación'),
+  }, ['lead_id', 'organization_id', 'nombre', 'fuente', 'estado', 'created_at'], {
+    lead_id: '42', organization_id: '1', campaign_id: '5', property_id: '3', nombre: 'María Rivas',
+    email: 'maria.rivas@correo.com', telefono: '+593991234567', fuente: 'meta_formulario',
+    estado: 'nuevo', notas: null, provider_lead_id: null, created_at: '2026-03-06T11:02:00.000Z',
+  }, 'Contrato REST de lead, traducido sobre contactos'),
+  LeadInput: contractSchema({
+    nombre: { type: 'string' }, email: { type: 'string', nullable: true }, telefono: { type: 'string', nullable: true },
+    campaign_id: stringId('ID de campaña'), property_id: stringId('ID de propiedad'),
+    fuente: { type: 'string', enum: ['meta_formulario', 'whatsapp', 'landing', 'manual', 'lotes_al_mando'] },
+    estado: { type: 'string', enum: ['nuevo', 'contactado', 'calificado', 'visitado', 'cerrado', 'perdido'] },
+    notas: { type: 'string', nullable: true }, provider_lead_id: { type: 'string', nullable: true },
+  }, ['nombre', 'fuente'], { nombre: 'María Rivas', email: 'maria.rivas@correo.com', fuente: 'manual' }, 'Payload de lead'),
+  ModeloIa: contractSchema({
+    model_id: stringId('ID del modelo'),
+    provider: { type: 'string' },
+    provider_model_id: { type: 'string' },
+    nombre: { type: 'string' },
+    media_type: { type: 'string', enum: ['image', 'video'] },
+    capabilities: { type: 'object' },
+    duracion_min_s: { type: 'integer', nullable: true },
+    duracion_max_s: { type: 'integer', nullable: true },
+    ratios: { type: 'array', items: { type: 'string' }, nullable: true },
+    quote_creditos: { type: 'integer' },
+    status: { type: 'string', enum: ['activo', 'inactivo', 'no_disponible'] },
+    created_at: ts('Fecha de creación'),
+  }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'quote_creditos', 'status', 'created_at'], {
+    model_id: '1', provider: 'higgsfield', provider_model_id: 'higgsfield/soul-4-image',
+    nombre: 'Soul 4 Image', media_type: 'image', capabilities: {}, duracion_min_s: null,
+    duracion_max_s: null, ratios: ['1:1', '4:5'], quote_creditos: 2, status: 'activo',
+    created_at: '2026-03-06T09:00:00.000Z',
+  }, 'Modelo de IA disponible para cotización y generación'),
+  Generacion: contractSchema({
+    generation_id: stringId('ID de generación'),
+    organization_id: stringId('ID de empresa'),
+    property_id: stringId('ID de propiedad'),
+    template_id: stringId('ID de plantilla'),
+    model_id: stringId('ID de modelo'),
+    modo: { type: 'string', enum: ['facil', 'pro'] },
+    prompt: { type: 'string' },
+    parametros: { type: 'object' },
+    status: { type: 'string', enum: ['created', 'quoted', 'credits_reserved', 'queued', 'processing', 'completed', 'failed', 'canceled'] },
+    credits_cost: { type: 'integer' },
+    provider_request_id: { type: 'string', nullable: true },
+    error_message: { type: 'string', nullable: true },
+    created_at: ts('Fecha de creación'),
+    updated_at: ts('Última modificación'),
+  }, ['generation_id', 'organization_id', 'model_id', 'modo', 'prompt', 'parametros', 'status', 'credits_cost', 'created_at', 'updated_at'], {
+    generation_id: '19', organization_id: '1', property_id: '3', template_id: '2', model_id: '1',
+    modo: 'facil', prompt: 'Render fotorrealista de la propiedad.', parametros: { ratio: '9:16' },
+    status: 'completed', credits_cost: 2, provider_request_id: 'sim_123', error_message: null,
+    created_at: '2026-03-06T11:15:00.000Z', updated_at: '2026-03-06T11:15:00.000Z',
+  }, 'Job persistido de generación IA'),
+  GeneracionInput: contractSchema({
+    property_id: stringId('ID de propiedad'),
+    template_id: stringId('ID de plantilla'),
+    model_id: stringId('ID de modelo'),
+    modo: { type: 'string', enum: ['facil', 'pro'] },
+    prompt: { type: 'string', minLength: 1, maxLength: 10000 },
+    parametros: { type: 'object' },
+  }, ['model_id', 'prompt'], {
+    property_id: '3', template_id: '2', model_id: '1', modo: 'facil',
+    prompt: 'Render fotorrealista de la propiedad.', parametros: { ratio: '9:16' },
+  }, 'Payload de generación; el costo y estado los calcula el API'),
+  CreditWallet: contractSchema({
+    wallet_id: stringId('ID de wallet'),
+    organization_id: stringId('ID de empresa'),
+    saldo: { type: 'integer' },
+    moneda: { type: 'string' },
+    created_at: ts('Fecha de creación'),
+    updated_at: ts('Última modificación'),
+  }, ['wallet_id', 'organization_id', 'saldo', 'moneda', 'updated_at'], {
+    wallet_id: '8cbb1b26-2e12-4ca1-9af0-26010f44f001', organization_id: '1',
+    saldo: 25, moneda: 'USD', created_at: '2026-03-06T09:00:00.000Z', updated_at: '2026-03-06T09:00:00.000Z',
+  }, 'Wallet de créditos de la organización'),
+  CreditTransaction: contractSchema({
+    transaction_id: stringId('ID de transacción'),
+    wallet_id: stringId('ID de wallet'),
+    organization_id: stringId('ID de empresa'),
+    tipo: { type: 'string', enum: ['reserva', 'consumo', 'devolucion', 'recarga', 'ajuste'] },
+    monto: { type: 'integer' },
+    generation_id: stringId('ID de generación'),
+    descripcion: { type: 'string', nullable: true },
+    idempotency_key: { type: 'string', nullable: true },
+    created_at: ts('Fecha de creación'),
+  }, ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'created_at'], {
+    transaction_id: '1', wallet_id: '8cbb1b26-2e12-4ca1-9af0-26010f44f001', organization_id: '1',
+    tipo: 'recarga', monto: 25, generation_id: null, descripcion: 'Créditos de bienvenida IMVOLT',
+    idempotency_key: 'welcome:1', created_at: '2026-03-06T09:00:00.000Z',
+  }, 'Movimiento inmutable del ledger de créditos'),
+  CreditRechargeInput: contractSchema({
+    monto: { type: 'integer', minimum: 1, maximum: 1000000 },
+    idempotency_key: { type: 'string', nullable: true },
+  }, ['monto'], { monto: 25 }, 'Payload de recarga simulada'),
+});
+
 /** Nombres de esquema disponibles para `$ref`. */
-export const schemaNames = definitions.map((def) => def.name);
+export const schemaNames = [...definitions.map((def) => def.name), 'Conexion', 'Campaign', 'Lead', 'ModeloIa', 'Generacion', 'CreditWallet', 'CreditTransaction'];

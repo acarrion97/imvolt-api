@@ -1,30 +1,42 @@
-// models/commerce.model.ts
-// Tipos del módulo de comercio: wallet de créditos y ledger de movimientos.
-//
-// NOTA: las tablas `credit_wallets` y `credit_transactions` pertenecían al
-// esquema anterior (documento maestro) y fueron retiradas de `schema.sql` al
-// alinear la base con el diagrama relacional. El servicio de créditos debe
-// reactivarse sobre un modelo nuevo antes de volver a usarse.
-
-/** Tipo de movimiento del ledger de créditos. */
-export type TipoMovimiento = 'reserva' | 'consumo' | 'devolucion' | 'recarga' | 'ajuste';
-
 /** Wallet de créditos de una organización. */
 export interface CreditWallet {
   wallet_id: string;
-  organization_id: string;
+  organization_id: number | string;
   saldo: number;
   moneda: string;
-  updated_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-/** Movimiento inmutable del ledger; el saldo nunca cambia sin uno de estos. */
+export type TipoMovimiento = 'reserva' | 'consumo' | 'devolucion' | 'recarga' | 'ajuste';
+
+/** Movimiento inmutable del ledger de créditos. */
 export interface CreditTransaction {
-  transaction_id: string;
+  transaction_id: number;
   wallet_id: string;
+  organization_id: number | string;
   tipo: TipoMovimiento;
   monto: number;
-  idempotency_key: string;
-  detalles: Record<string, unknown> | null;
-  creado_en: string;
+  generation_id: number | null;
+  descripcion: string | null;
+  idempotency_key: string | null;
+  created_at: string;
 }
+
+export interface CreditTransactionView extends Omit<CreditTransaction, 'transaction_id' | 'generation_id' | 'organization_id'> {
+  transaction_id: string;
+  generation_id: string | null;
+  organization_id: string;
+}
+
+export const creditWalletsModel = {
+  table: 'credit_wallets',
+  fields: ['wallet_id', 'organization_id', 'saldo', 'moneda', 'created_at', 'updated_at'],
+  primary: 'wallet_id',
+};
+
+export const creditTransactionsModel = {
+  table: 'credit_transactions',
+  fields: ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'generation_id', 'descripcion', 'idempotency_key', 'created_at'],
+  primary: 'transaction_id',
+};

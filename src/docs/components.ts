@@ -15,6 +15,7 @@ export const openapiTags = [
   { name: 'Creative', description: 'Plantillas, formatos, enfoques comerciales y contenidos generados con IA (RF-04 / RF-05)' },
   { name: 'Publicidad', description: 'Objetivos y campañas publicitarias de IMVOLT Ads (RF-07 / RF-08)' },
   { name: 'Leads', description: 'Contactos captados por campañas, formularios o registro manual (RF-10)' },
+  { name: 'Créditos', description: 'Wallet, recargas y movimientos del ledger de créditos de generación (RF-06)' },
   { name: 'Auditoría', description: 'Bitácora de solo lectura: quién hizo qué, sobre qué tabla y dentro de qué empresa (RF-09)' },
   { name: 'Brand Kit', description: 'Archivos de marca y colores de la paleta: versiones en bucket privado y descargas con URL firmada' },
 ];

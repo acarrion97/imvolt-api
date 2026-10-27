@@ -44,17 +44,20 @@ import {
   contenidoIaRouter,
   enfoqueComercialRouter,
   formatoRouter,
+  generacionRouter,
+  modeloRouter,
   plantillaRouter,
   tipoPlantillaRouter,
 } from './routes/creative.route';
-import { campaniaPublicitariaRouter, objetivoPublicidadRouter } from './routes/advertising.route';
-import { contactoRouter } from './routes/leads.route';
+import { campaignRouter, campaniaPublicitariaRouter, conexionRouter, objetivoPublicidadRouter } from './routes/advertising.route';
+import { contactoRouter, leadRouter } from './routes/leads.route';
+import { billingRouter } from './routes/billing.route';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
 import { errorResponse } from './core/errors';
-import { openapiComponents, openapiCrudPaths, openapiTags } from './docs';
+import { openapiComponents, openapiCrudPaths, openapiExtraPaths, openapiTags } from './docs';
 
 dotenv.config();
 
@@ -113,6 +116,8 @@ app.use('/api/v1/propiedades', propiedadRouter);
 app.use('/api/v1/tipos-propiedad', tipoPropiedadRouter);
 
 // creative
+app.use('/api/v1/modelos', modeloRouter);
+app.use('/api/v1/creative/generations', generacionRouter);
 app.use('/api/v1/plantillas', plantillaRouter);
 app.use('/api/v1/tipos-plantilla', tipoPlantillaRouter);
 app.use('/api/v1/formatos', formatoRouter);
@@ -120,11 +125,17 @@ app.use('/api/v1/enfoques-comerciales', enfoqueComercialRouter);
 app.use('/api/v1/contenidos-ia', contenidoIaRouter);
 
 // advertising
+app.use('/api/v1/conexiones', conexionRouter);
+app.use('/api/v1/campaigns', campaignRouter);
 app.use('/api/v1/objetivos-publicidad', objetivoPublicidadRouter);
 app.use('/api/v1/campanias-publicitarias', campaniaPublicitariaRouter);
 
 // leads
+app.use('/api/v1/leads', leadRouter);
 app.use('/api/v1/contactos', contactoRouter);
+
+// billing
+app.use('/api/v1/billing', billingRouter);
 
 // brand kit (identidad de marca: archivos en bucket privado + colores)
 app.use('/api/v1/brand-assets', brandAssetRouter);
@@ -170,7 +181,7 @@ const swaggerOptions: swaggerJsdoc.Options = {
 };
 
 const spec = swaggerJsdoc(swaggerOptions) as Record<string, any>;
-spec.paths = { ...openapiCrudPaths, ...(spec.paths ?? {}) };
+spec.paths = { ...openapiCrudPaths, ...openapiExtraPaths, ...(spec.paths ?? {}) };
 
 // Identidad visual de la documentación (paleta del manual de marca IMVOLT).
 const swaggerUiOptions: swaggerUi.SwaggerUiOptions = {

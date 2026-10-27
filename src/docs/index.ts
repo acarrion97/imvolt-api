@@ -242,8 +242,53 @@ export const crudModules: CrudDocConfig[] = [
       { name: 'formato_id', description: 'Filtra por formato de salida', example: 1 },
     ],
   },
+  {
+    path: '/api/v1/modelos',
+    tag: 'Creative',
+    schema: 'ModeloIa',
+    entity: 'Modelo IA',
+    plural: 'Modelos IA',
+    idExample: 1,
+    disabled: ['create', 'update', 'remove'],
+    filters: [
+      { name: 'media_type', description: 'Filtra por tipo de medio', type: 'string', enum: ['image', 'video'] },
+      { name: 'status', description: 'Filtra por disponibilidad', type: 'string', enum: ['activo', 'inactivo', 'no_disponible'] },
+    ],
+  },
+  {
+    path: '/api/v1/creative/generations',
+    tag: 'Creative',
+    schema: 'Generacion',
+    entity: 'Generación',
+    plural: 'Generaciones',
+    idExample: 19,
+    disabled: ['update', 'remove'],
+    filters: [{ name: 'property_id', description: 'Filtra por propiedad', type: 'string', example: '3' }],
+  },
 
   // ── Publicidad ───────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/conexiones',
+    tag: 'Publicidad',
+    schema: 'Conexion',
+    entity: 'Conexión',
+    female: true,
+    idExample: 2,
+    filters: [{ name: 'estado', description: 'Filtra por estado de conexión', type: 'string', enum: ['pendiente', 'conectada', 'revocada'] }],
+  },
+  {
+    path: '/api/v1/campaigns',
+    tag: 'Publicidad',
+    schema: 'Campaign',
+    entity: 'Campaña',
+    female: true,
+    idExample: 5,
+    filters: [
+      { name: 'property_id', description: 'Filtra por propiedad', type: 'string', example: '3' },
+      { name: 'connection_id', description: 'Filtra por conexión Meta', type: 'string', example: '2' },
+      { name: 'estado', description: 'Filtra por etapa del flujo', type: 'string', enum: ['local_draft', 'validated', 'awaiting_approval', 'approved', 'published_paused', 'active', 'rejected', 'failed', 'archived'] },
+    ],
+  },
   {
     path: '/api/v1/objetivos-publicidad',
     tag: 'Publicidad',
@@ -267,6 +312,18 @@ export const crudModules: CrudDocConfig[] = [
 
   // ── Leads ────────────────────────────────────────────────────────────────
   {
+    path: '/api/v1/leads',
+    tag: 'Leads',
+    schema: 'Lead',
+    entity: 'Lead',
+    idExample: 42,
+    filters: [
+      { name: 'campaign_id', description: 'Filtra por campaña', type: 'string', example: '5' },
+      { name: 'property_id', description: 'Filtra por propiedad', type: 'string', example: '3' },
+      { name: 'fuente', description: 'Filtra por fuente de captación', type: 'string', enum: ['meta_formulario', 'whatsapp', 'landing', 'manual', 'lotes_al_mando'] },
+    ],
+  },
+  {
     path: '/api/v1/contactos',
     tag: 'Leads',
     schema: 'Contacto',
@@ -281,6 +338,18 @@ export const crudModules: CrudDocConfig[] = [
       },
       { name: 'propiedad_id', description: 'Filtra por inmueble consultado', example: 3 },
     ],
+  },
+
+  // ── Créditos ────────────────────────────────────────────────────────────
+  {
+    path: '/api/v1/billing/transactions',
+    tag: 'Créditos',
+    schema: 'CreditTransaction',
+    entity: 'Movimiento de créditos',
+    plural: 'Movimientos de créditos',
+    idExample: 1,
+    disabled: ['create', 'update', 'remove'],
+    filters: [{ name: 'tipo', description: 'Filtra por tipo de movimiento', type: 'string', enum: ['reserva', 'consumo', 'devolucion', 'recarga', 'ajuste'] }],
   },
 
   // ── Brand Kit ────────────────────────────────────────────────────────────
@@ -355,5 +424,37 @@ export const openapiCrudPaths: Record<string, any> = crudModules.reduce<Record<s
   (acc, module) => Object.assign(acc, crudPaths(module)),
   {}
 );
+
+/** Operaciones de billing que no son CRUD de un recurso individual. */
+export const openapiExtraPaths: Record<string, any> = {
+  '/api/v1/billing/wallet': {
+    get: {
+      tags: ['Créditos'],
+      summary: 'Consulta la wallet de la empresa activa',
+      responses: {
+        200: { description: 'Wallet de créditos', content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditWallet' } } } },
+        401: { $ref: '#/components/responses/Unauthorized' },
+        403: { $ref: '#/components/responses/Forbidden' },
+      },
+    },
+  },
+  '/api/v1/billing/recharge': {
+    post: {
+      tags: ['Créditos'],
+      summary: 'Recarga créditos (pasarela simulada)',
+      description: 'Disponible para miembros activos. La recarga es un stub de pago y devuelve el saldo actualizado.',
+      requestBody: {
+        required: true,
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditRechargeInput' }, example: { monto: 25, idempotency_key: 'purchase-2026-03-06-001' } } },
+      },
+      responses: {
+        201: { description: 'Wallet actualizada', content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditWallet' } } } },
+        400: { $ref: '#/components/responses/BadRequest' },
+        401: { $ref: '#/components/responses/Unauthorized' },
+        402: { description: 'Créditos insuficientes para la operación' },
+      },
+    },
+  },
+};
 
 export { openapiTags };

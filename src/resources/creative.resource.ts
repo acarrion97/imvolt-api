@@ -10,7 +10,41 @@ import { EnfoqueComercial } from '../models/creative/enfoque_comercial.model';
 import { Formato } from '../models/creative/formato.model';
 import { PlantillaView } from '../models/creative/plantilla.model';
 import { TipoPlantilla } from '../models/creative/tipo_plantilla.model';
+import { ModeloIaView } from '../models/creative/modelo_ia.model';
+import { GeneracionView } from '../models/creative/generacion.model';
 import { propiedadResource } from './property.resource';
+
+export const modeloResource = new BaseResource<any, ModeloIaView>((row) => ({
+  model_id: String(row.modelo_id),
+  provider: row.proveedor,
+  provider_model_id: row.modelo_proveedor_id,
+  nombre: row.nombre,
+  media_type: row.tipo_media,
+  capabilities: row.capacidades ?? {},
+  duracion_min_s: row.duracion_min_s ?? null,
+  duracion_max_s: row.duracion_max_s ?? null,
+  ratios: row.ratios ?? null,
+  quote_creditos: Number(row.creditos_cotizacion),
+  status: row.estado,
+  created_at: new Date(row.creado_en).toISOString(),
+}));
+
+export const generacionResource = new BaseResource<any, GeneracionView>((row) => ({
+  generation_id: String(row.generacion_id),
+  organization_id: row.empresa_id == null ? null : String(row.empresa_id),
+  property_id: row.propiedad_id == null ? null : String(row.propiedad_id),
+  template_id: row.plantilla_id == null ? null : String(row.plantilla_id),
+  model_id: String(row.modelo_id),
+  modo: row.modo,
+  prompt: row.prompt,
+  parametros: row.parametros ?? {},
+  status: row.estado,
+  credits_cost: Number(row.creditos_costo),
+  provider_request_id: row.peticion_proveedor_id ?? null,
+  error_message: row.error_mensaje ?? null,
+  created_at: new Date(row.creado_en).toISOString(),
+  updated_at: new Date(row.actualizado_en).toISOString(),
+}));
 
 export const tipoPlantillaResource = new BaseResource<any, TipoPlantilla>((row) => ({
   tipo_plantilla_id: row.tipo_plantilla_id,

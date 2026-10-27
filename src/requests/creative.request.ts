@@ -5,6 +5,7 @@
 import Joi from 'joi';
 import { BaseRequest } from '../core';
 import { buildSchemas, fk } from './helpers';
+import { ModeloMediaType } from '../models/creative/modelo_ia.model';
 
 // ── Tipos de plantilla ──────────────────────────────────────────────────────
 const tipoPlantillaShape = {
@@ -60,4 +61,49 @@ const contenidoIaShape = {
 
 export const contenidoIaRequest = new BaseRequest(
   buildSchemas(contenidoIaShape, { required: ['propiedad_id', 'plantilla_id', 'formato_id', 'duracion', 'enfoque_comercial_id'] })
+);
+
+// ── Catálogo vivo de modelos IA ────────────────────────────────────────────
+const modeloIaShape = {
+  proveedor: Joi.string().max(50),
+  modelo_proveedor_id: Joi.string().max(120),
+  nombre: Joi.string().min(2).max(120),
+  tipo_media: Joi.string().valid('image', 'video'),
+  capacidades: Joi.object().unknown(true),
+  duracion_min_s: Joi.number().integer().positive().allow(null),
+  duracion_max_s: Joi.number().integer().positive().allow(null),
+  ratios: Joi.array().items(Joi.string()).allow(null),
+  creditos_cotizacion: Joi.number().integer().min(0),
+  estado: Joi.string().valid('activo', 'inactivo', 'no_disponible'),
+};
+
+export const modeloRequest = new BaseRequest(
+  buildSchemas(modeloIaShape, { required: ['proveedor', 'modelo_proveedor_id', 'nombre', 'tipo_media'] })
+);
+
+// ── Jobs de generación IA ──────────────────────────────────────────────────
+const generacionShape = {
+  empresa_id: fk(),
+  propiedad_id: fk().allow(null),
+  plantilla_id: fk().allow(null),
+  modelo_id: fk(),
+  modo: Joi.string().valid('facil', 'pro').default('facil'),
+  prompt: Joi.string().min(1).max(10000),
+  parametros: Joi.object().unknown(true).default({}),
+};
+
+export const generacionRequest = new BaseRequest(
+  buildSchemas(generacionShape, { required: ['modelo_id', 'prompt'], defaults: { modo: 'facil', parametros: {} } })
+);
+
+export type GeneracionMediaType = ModeloMediaType;
+
+// ── Recarga de créditos ────────────────────────────────────────────────────
+const rechargeShape = {
+  monto: Joi.number().integer().positive().max(1_000_000),
+  idempotency_key: Joi.string().min(1).max(120).allow(null),
+};
+
+export const rechargeRequest = new BaseRequest(
+  buildSchemas(rechargeShape, { required: ['monto'] })
 );
