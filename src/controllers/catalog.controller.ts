@@ -23,7 +23,7 @@ import { BaseController, auditContext } from '../core/base.controller';
 import { BaseService } from '../core/base.service';
 import { createCrudRouter } from '../core/crud.factory';
 import { HttpError, NotFoundError, ValidationError } from '../core/errors';
-import { writeByMarketing, writeByOwnerOrAdmin } from '../middlewares/requireRole';
+import { requirePermission } from '../middlewares/requireRole';
 import { filterByEmpresa } from '../middlewares/tenantScope';
 import { requireOrg } from '../middlewares/sessionAuth';
 import {
@@ -213,6 +213,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     subidaMiddleware,
     async (req: Request, res: Response) => {
       try {
@@ -309,6 +310,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones/:vid/restaurar',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     async (req: Request, res: Response) => {
       try {
         const media = await mediaDeSesion(req);
@@ -331,6 +333,7 @@ function registrarRutasStorage(router: Router): void {
   router.delete(
     '/:id/versiones/:vid',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     async (req: Request, res: Response) => {
       try {
         const media = await mediaDeSesion(req);
@@ -377,7 +380,7 @@ export const { router: proyectoRouter } = createCrudRouter<Proyecto>({
   resource: proyectoResource,
   entityName: 'Proyecto',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, empresaEnEscritura],
+  writeMiddlewares: [requirePermission('gestionar_propiedades'), empresaEnEscritura],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
@@ -393,7 +396,7 @@ export const { router: mediaAssetRouter } = createCrudRouter<MediaAsset>({
   resource: mediaAssetResource,
   entityName: 'Media asset',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByMarketing, empresaEnEscritura],
+  writeMiddlewares: [requirePermission('crear_contenidos'), empresaEnEscritura],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',

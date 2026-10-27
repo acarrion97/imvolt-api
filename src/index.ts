@@ -24,7 +24,7 @@ import dotenv from 'dotenv';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
-import { config } from './config/global';
+import { config, validateRuntimeConfig } from './config/global';
 import authRoutes from './routes/auth.route';
 import {
   auditLogRouter,
@@ -56,10 +56,36 @@ import { asegurarBucket as asegurarBucketMedia } from './services/media.storage'
 import { openapiComponents, openapiCrudPaths, openapiTags } from './docs';
 
 dotenv.config();
+validateRuntimeConfig();
 
 const app = express();
 
 // ── Middleware global ────────────────────────────────────────────────────────
+app.disable('x-powered-by');
+app.set('trust proxy', config.trustProxyHops);
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+  );
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.secure) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  }
+
+  if (config.production && !req.secure) {
+    res.status(426).json({ message: 'HTTPS es obligatorio para acceder a esta API.' });
+    return;
+  }
+
+  next();
+});
+
 app.use(cors({ origin: config.allowedOrigin }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -181,8 +207,8 @@ app.use('/documentacion', swaggerUi.serve, swaggerUi.setup(spec, swaggerUiOption
 
 // ── Arranque ────────────────────────────────────────────────────────────────
 app.listen(config.port, () => {
-  console.log(`IMVOLT API escuchando en http://localhost:${config.port}`);
-  console.log(`Documentación: http://localhost:${config.port}/documentacion`);
+  console.log(`IMVOLT API escuchando en el puerto ${config.port}`);
+  console.log(`Documentación disponible en /documentacion`);
   if (config.higgsfield.simulate) console.log('Higgsfield: MODO SIMULADO (sin API key)');
   if (config.meta.simulate) console.log('Meta: MODO SIMULADO (sin credenciales; solo borradores)');
   // Bucket privado del Brand Kit: lo crea/ajusta (10 MB + MIME) sin bloquear el arranque.

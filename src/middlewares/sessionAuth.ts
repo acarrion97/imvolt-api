@@ -19,6 +19,7 @@
 
 import { NextFunction, Request, Response } from 'express';
 import supabase from '../config/supabaseClient';
+import { ORG_ROLES } from './requireRole';
 
 interface UsuarioRow {
   usuario_id: number;
@@ -125,10 +126,18 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
       .map((asignacion) => asignacion.roles as unknown as RolConPermisos | null)
       .filter((rol): rol is RolConPermisos => Boolean(rol?.nombre) && rol?.estado !== 'inactivo');
 
-    const rol = rolesActivos[0]?.nombre;
+    const rolesReconocidos = rolesActivos.filter((rol) =>
+      ORG_ROLES.includes(rol.nombre as (typeof ORG_ROLES)[number])
+    );
+    if (rolesReconocidos.length === 0) {
+      res.status(403).json({ message: 'El usuario no tiene un rol activo autorizado' });
+      return;
+    }
+
+    const rol = rolesReconocidos[0]?.nombre;
 
     const permisos = new Set<string>();
-    for (const rolActivo of rolesActivos) {
+    for (const rolActivo of rolesReconocidos) {
       for (const vinculo of rolActivo.roles_permisos ?? []) {
         const permiso = (vinculo as { permisos?: { nombre?: string; estado?: string } | null }).permisos;
         if (permiso?.nombre && permiso.estado !== 'inactivo') permisos.add(permiso.nombre);
@@ -137,7 +146,7 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
 
     req.organizationId = empresaId;
     req.orgRole = rol;
-    req.orgRoles = rolesActivos
+    req.orgRoles = rolesReconocidos
       .map((rolActivo) => rolActivo.nombre)
       .filter((nombre): nombre is string => Boolean(nombre));
     req.permissions = [...permisos];

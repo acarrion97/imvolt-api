@@ -6,7 +6,7 @@ import { propiedadRequest, tipoPropiedadRequest } from '../requests/property.req
 import { propiedadResource, tipoPropiedadResource } from '../resources/property.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
 import { assignEmpresaOnCreate, filterByEmpresa } from '../middlewares/tenantScope';
-import { writeByOwnerOrAdmin } from '../middlewares/requireRole';
+import { requirePermission, writeByOwnerOrAdmin } from '../middlewares/requireRole';
 
 // ── Tipos de propiedad (catálogo compartido) ────────────────────────────────
 export const { router: tipoPropiedadRouter } = createCrudRouter({
@@ -29,6 +29,6 @@ export const { router: propiedadRouter } = createCrudRouter({
   resource: propiedadResource,
   entityName: 'Propiedad',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, assignEmpresaOnCreate],
+  writeMiddlewares: [requirePermission('gestionar_propiedades'), assignEmpresaOnCreate],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
 });

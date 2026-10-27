@@ -193,6 +193,39 @@ create table if not exists public.propiedades (
     actualizado_en     timestamptz not null default now()
 );
 
+-- Asegura la relación también en instalaciones donde `propiedades` existía
+-- antes de agregar la asociación con proyectos.
+alter table public.propiedades
+    add column if not exists proyecto_id bigint;
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_constraint c
+        join pg_attribute source_column
+          on source_column.attrelid = c.conrelid
+         and source_column.attnum = c.conkey[1]
+        join pg_attribute target_column
+          on target_column.attrelid = c.confrelid
+         and target_column.attnum = c.confkey[1]
+        where c.contype = 'f'
+          and array_length(c.conkey, 1) = 1
+          and array_length(c.confkey, 1) = 1
+          and c.conrelid = 'public.propiedades'::regclass
+          and c.confrelid = 'public.proyectos'::regclass
+          and source_column.attname = 'proyecto_id'
+          and target_column.attname = 'proyecto_id'
+    ) then
+        alter table public.propiedades
+            add constraint fk_propiedades_proyecto
+            foreign key (proyecto_id)
+            references public.proyectos (proyecto_id)
+            on delete set null;
+    end if;
+end
+$$;
+
 -- ── CATÁLOGO: MEDIA ASSETS ───────────────────────────────────────────────────
 -- Medios finales de la empresa (fotos, renders, videos, documentos) guardados
 -- en almacenamiento propio (§12: no depender del CDN del proveedor).
@@ -647,3 +680,5 @@ insert into public.integraciones (nombre, proveedor, descripcion) values
     ('WhatsApp Business', 'Meta', 'Conversaciones con prospectos desde anuncios'),
     ('Higgsfield', 'Higgsfield', 'Generación de imagen y video con IA')
 on conflict do nothing;
+
+notify pgrst, 'reload schema';

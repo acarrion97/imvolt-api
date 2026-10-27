@@ -21,7 +21,7 @@ import { BaseController } from '../core/base.controller';
 import { BaseService } from '../core/base.service';
 import { createCrudRouter } from '../core/crud.factory';
 import { HttpError, NotFoundError, ValidationError } from '../core/errors';
-import { writeByMarketing } from '../middlewares/requireRole';
+import { requirePermission, writeByOwnerOrAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa } from '../middlewares/tenantScope';
 import { requireOrg } from '../middlewares/sessionAuth';
 import { BrandAsset, BrandAssetVersion, BrandColor } from '../models/brandkit';
@@ -202,6 +202,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     subidaMiddleware,
     async (req: Request, res: Response) => {
       try {
@@ -298,6 +299,7 @@ function registrarRutasStorage(router: Router): void {
   router.post(
     '/:id/versiones/:vid/restaurar',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     async (req: Request, res: Response) => {
       try {
         const asset = await assetDeSesion(req);
@@ -320,6 +322,7 @@ function registrarRutasStorage(router: Router): void {
   router.delete(
     '/:id/versiones/:vid',
     ...requireOrg,
+    requirePermission('crear_contenidos'),
     async (req: Request, res: Response) => {
       try {
         const asset = await assetDeSesion(req);
@@ -368,7 +371,7 @@ export const { router: brandAssetRouter } = createCrudRouter<BrandAsset>({
   resource: brandAssetResource,
   entityName: 'Archivo de marca',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByMarketing, empresaEnEscritura],
+  writeMiddlewares: [requirePermission('crear_contenidos'), empresaEnEscritura],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
@@ -384,7 +387,7 @@ export const { router: brandColorRouter } = createCrudRouter<BrandColor>({
   resource: brandColorResource,
   entityName: 'Color de marca',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByMarketing, empresaEnEscritura],
+  writeMiddlewares: [writeByOwnerOrAdmin, empresaEnEscritura],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',

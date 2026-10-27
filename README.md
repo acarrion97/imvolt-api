@@ -295,6 +295,9 @@ npm install
 #    (28 tablas del diagrama + buckets privados `brand-kit` y `media-assets` +
 #    RLS denegado por defecto + semillas de roles, permisos, tipos de
 #    propiedad, plantillas, formatos, enfoques, objetivos, hitos e integraciones)
+#    Si propiedades ya existe y el API reporta que no hay relación con
+#    proyectos, ejecuta database/migrations/20261026_add_propiedades_proyecto_fk.sql.
+#    La migración añade la FK faltante y solicita recargar la caché de PostgREST.
 # 2. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en .env
 
 npm run dev               # desarrollo (ts-node)
@@ -304,6 +307,31 @@ npm start                 # node dist/index.js
 
 Documentación Swagger: `http://localhost:3000/documentacion`
 Salud del servicio: `GET /api/health`
+
+## Seguridad en producción
+
+- Termina TLS en un proxy inverso administrado (TLS 1.2 o superior) y sirve
+  tanto la aplicación como la API mediante HTTPS. El proxy debe sobrescribir,
+  no conservar, los encabezados `Forwarded` / `X-Forwarded-*` recibidos del
+  cliente.
+- Define `NODE_ENV=production`, `TRUST_PROXY_HOPS` con el número exacto de
+  proxies confiables y `ALLOWED_ORIGIN` con los orígenes HTTPS del frontend.
+  La API exige al menos un salto confiable y rechaza solicitudes que Express
+  no reconozca como seguras. No expongas el puerto de Node directamente a
+  Internet: limita el acceso de red al proxy configurado, ya que la confianza
+  en encabezados reenviados depende de ello.
+- Inyecta `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y las demás credenciales
+  desde el gestor de secretos del entorno de ejecución; no las guardes en el
+  repositorio, imágenes, logs ni configuración del frontend. La clave service
+  role es exclusiva del servidor y omite RLS, por lo que el API debe aplicar
+  autorización y alcance de tenant en cada endpoint.
+- Restringe el acceso al gestor de secretos a la identidad de despliegue/API
+  que lo necesite. Rota inmediatamente las claves ante exposición y programa
+  su rotación periódica; actualiza el secreto en el runtime y revoca la clave
+  anterior después de verificar el despliegue.
+- El navegador solo recibe configuración pública (por ejemplo,
+  `VITE_API_URL`) y credenciales de sesión del usuario. No publiques secretos
+  compartidos mediante variables `VITE_*`.
 
 ## Estructura
 
