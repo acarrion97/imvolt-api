@@ -66,13 +66,13 @@ export function validateEnv(env: Env): EnvReport {
   // ── CORS ───────────────────────────────────────────────────────────────────
   const origins = get('ALLOWED_ORIGIN')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().replace(/\/$/, ''))
     .filter(Boolean);
   if (origins.includes('*')) errors.push('ALLOWED_ORIGIN no admite "*": lista los orígenes exactos.');
   for (const origin of origins.filter((item) => item !== '*')) {
     const url = parseUrl(origin);
     if (!url || url.origin !== origin) {
-      errors.push(`ALLOWED_ORIGIN contiene un origen inválido ("${origin}"): usa esquema://host[:puerto] sin ruta ni "/" final.`);
+      errors.push(`ALLOWED_ORIGIN contiene un origen inválido ("${origin}"): usa esquema://host[:puerto] sin ruta.`);
     } else if (prod && url.protocol !== 'https:') {
       errors.push(`ALLOWED_ORIGIN contiene un origen sin https en producción ("${origin}").`);
     }
