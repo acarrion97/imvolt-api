@@ -13,6 +13,11 @@ export interface CampaniaPublicitaria extends BaseModel<CampaniaPublicitaria> {
   duracion_dias: number;
   zona_referencia: string;
   copy_anuncio: string;
+  /** ID de la campaña en Meta (null mientras sea borrador local). */
+  meta_campaign_id: string | null;
+  /** null = borrador · 'publicando' = reservada · 'published_paused' = creada en Meta (PAUSED). */
+  meta_estado: 'publicando' | 'published_paused' | null;
+  publicada_en: string | null;
 }
 
 /** MODELO DE VISUALIZACIÓN: la campaña con su propiedad y su objetivo. */

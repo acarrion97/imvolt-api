@@ -327,6 +327,20 @@ Sin credenciales la API es completamente funcional en modo simulado:
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
+### Publicar una campaña en Meta
+
+`POST /api/v1/campanias-publicitarias/:id/publicar` crea la campaña en Meta con el SDK
+oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body opcional:
+`{ "validar_solo": true }` (Meta valida sin crear nada).
+
+- Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
+- Usa la integración **Meta Ads** activa de la empresa: `api_id` = cuenta publicitaria
+  (`act_…`) y `access_token` en `configuraciones_integraciones`.
+- Con credenciales reales: `META_SIMULATE=false`, `META_APP_ID` y `META_APP_SECRET`.
+- Antes de desplegar ejecuta `database/migrations/2026-10-27_meta_campaign_publish.sql`
+  (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`).
+- Responde 409 si la campaña ya se publicó (o se está publicando); 404 si es de otra empresa.
+
 ## Puesta en marcha
 
 ```bash

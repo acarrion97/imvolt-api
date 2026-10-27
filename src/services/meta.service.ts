@@ -11,7 +11,7 @@
 // pausada sin permisos de Meta.
 
 import { config } from '../config/global';
-import { HttpError } from '../core/errors';
+import { HttpError, ValidationError } from '../core/errors';
 import { Campana, MetaConnection } from '../models/advertising/meta.model';
 
 export interface ValidationResult {
@@ -81,6 +81,104 @@ async function publishPaused(campaign: Campana): Promise<{ meta_campaign_id: str
   );
 }
 
+/** Credenciales de Meta Ads de una empresa (tabla `configuraciones_integraciones`). */
+export interface MetaCredentials {
+  /** Cuenta publicitaria; se normaliza al formato `act_<id>`. */
+  adAccountId: string;
+  accessToken: string;
+}
+
+export interface PublishCampaniaInput {
+  campaniaId: number;
+  /** Nombre del objetivo de publicidad (catálogo: Mensajes, Formularios, Visitas, Tráfico, Branding). */
+  objetivo: string;
+  credentials: MetaCredentials;
+  /** Meta valida la petición pero NO crea la campaña. */
+  validateOnly?: boolean;
+}
+
+export interface PublishCampaniaResult {
+  /** null cuando solo se validó. */
+  meta_campaign_id: string | null;
+  simulado: boolean;
+  validado_solo: boolean;
+}
+
+/** Objetivo del catálogo IMVOLT → objetivo ODAX de Meta. */
+const OBJETIVO_META: Record<string, string> = {
+  mensajes: 'OUTCOME_ENGAGEMENT',
+  formularios: 'OUTCOME_LEADS',
+  visitas: 'OUTCOME_TRAFFIC',
+  trafico: 'OUTCOME_TRAFFIC',
+  branding: 'OUTCOME_AWARENESS',
+};
+
+const normalizar = (texto: string): string =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+/** Objetivo ODAX de Meta para un objetivo del catálogo; 400 si no tiene equivalente. */
+function objetivoMeta(objetivo: string): string {
+  const meta = OBJETIVO_META[normalizar(objetivo)];
+  if (!meta) {
+    throw new ValidationError('El objetivo de la campaña no tiene equivalente en Meta', [
+      { field: 'objetivo_publicidad_id', message: `Objetivo "${objetivo}" no soportado` },
+    ]);
+  }
+  return meta;
+}
+
+const normalizarCuenta = (id: string): string => (id.startsWith('act_') ? id : `act_${id}`);
+
+/**
+ * Crea la campaña en Meta con el SDK oficial, SIEMPRE en PAUSED y con la
+ * categoría especial HOUSING (anuncios inmobiliarios, §10). Sin credenciales
+ * de la App (`META_SIMULATE`) devuelve un ID ficticio. El presupuesto y la
+ * segmentación viven en el conjunto de anuncios (siguiente paso del flujo),
+ * no en la campaña.
+ *
+ * El token nunca se registra ni se devuelve: los errores de Meta se reducen a
+ * su mensaje público.
+ */
+async function publishCampaniaPaused(input: PublishCampaniaInput): Promise<PublishCampaniaResult> {
+  const objective = objetivoMeta(input.objetivo);
+  const validateOnly = input.validateOnly === true;
+
+  if (config.meta.simulate) {
+    return {
+      meta_campaign_id: validateOnly ? null : `META-SIM-${String(input.campaniaId).padStart(8, '0')}`,
+      simulado: true,
+      validado_solo: validateOnly,
+    };
+  }
+
+  // El SDK no publica tipos: se carga bajo demanda y se usa de forma acotada.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const bizSdk = require('facebook-nodejs-business-sdk');
+  bizSdk.FacebookAdsApi.init(input.credentials.accessToken);
+
+  const params: Record<string, unknown> = {
+    name: `IMVOLT · ${input.objetivo} · #${input.campaniaId}`,
+    objective,
+    status: 'PAUSED',
+    special_ad_categories: ['HOUSING'],
+    is_adset_budget_sharing_enabled: false,
+  };
+  if (validateOnly) params.execution_options = ['validate_only'];
+
+  try {
+    const creada = await new bizSdk.AdAccount(normalizarCuenta(input.credentials.adAccountId)).createCampaign([], params);
+    return {
+      meta_campaign_id: validateOnly ? null : String(creada.id),
+      simulado: false,
+      validado_solo: validateOnly,
+    };
+  } catch (error) {
+    const meta = (error as { response?: { error?: { message?: string; code?: number } } }).response?.error;
+    console.error('[meta] createCampaign falló', meta?.code ?? 'sin código');
+    throw new HttpError(502, `Meta rechazó la campaña: ${meta?.message ?? 'error desconocido'}`);
+  }
+}
+
 /** Consulta insights consolidados (simulados sin credenciales). */
 async function fetchInsights(campaign: Campana): Promise<{
   gasto: number;
@@ -110,4 +208,4 @@ async function fetchInsights(campaign: Campana): Promise<{
   );
 }
 
-export const metaService = { validate, publishPaused, fetchInsights };
+export const metaService = { validate, publishPaused, publishCampaniaPaused, fetchInsights };
