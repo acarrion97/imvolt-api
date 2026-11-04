@@ -359,8 +359,8 @@ GET/POST/PATCH/DELETE /api/v1/leads
 GET/DELETE            /api/v1/conexiones
 ```
 
-La publicación directa en Meta usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID`
-del entorno privado del backend; no utiliza OAuth ni `META_APP_SECRET`.
+Las credenciales de Meta se leen de la integración activa de la empresa en
+`configuraciones_integraciones`, vinculada por `empresas_integraciones`.
 
 ### Créditos (§16)
 
@@ -372,34 +372,62 @@ del entorno privado del backend; no utiliza OAuth ni `META_APP_SECRET`.
 
 ## Proveedores en modo simulado
 
-Sin credenciales la API es completamente funcional en modo simulado:
-
-| Variable | Efecto |
-|----------|--------|
-| `HIGGSFIELD_SIMULATE=true` (o sin ID + secreto de API) | Jobs simulados con latencia y resultado de demostración |
-| `META_SIMULATE=true` (o sin token/cuenta de Meta) | Borradores, aprobación y "publicación" con IDs simulados |
+Sin una integración activa configurada para la empresa, la API funciona en
+modo simulado: Higgsfield devuelve jobs de demostración y Meta genera IDs
+simulados. Las credenciales de proveedores no se guardan en `.env`.
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
-Para usar la API real, configura en el backend `HIGGSFIELD_API_KEY_ID`,
-`HIGGSFIELD_API_KEY_SECRET` y `HIGGSFIELD_SIMULATE=false`. El catálogo activo
-usa SOUL V2 para imágenes y Kling 2.6 para video, con los endpoints y formatos
-documentados oficialmente por Higgsfield.
+Para conectar un proveedor, crea la configuración de credenciales en
+`POST /api/v1/configuraciones-integraciones` y vincúlala a la empresa y al
+proveedor en `POST /api/v1/empresas-integraciones`. Ambos endpoints requieren
+sesión y permiso `gestionar_integraciones`. El catálogo de `integraciones`
+incluye `Higgsfield` y `Meta Ads`.
 
-### Publicar directamente en Meta (sin OAuth)
+Consulta los IDs disponibles con:
 
-Configura en el entorno privado del backend un token de acceso de usuario con
-permisos de Marketing API y la cuenta publicitaria:
-
-```env
-META_ACCESS_TOKEN=<token de acceso de usuario>
-META_AD_ACCOUNT_ID=act_<id_numérico>
-META_SIMULATE=false
+```sql
+select integracion_id, nombre
+from public.integraciones
+where nombre in ('Higgsfield', 'Meta Ads');
 ```
 
-El token no se escribe en el frontend, el código, logs ni Git y no se guarda en
-la base de datos. No se necesita `META_APP_SECRET`, `META_APP_ID` ni OAuth.
-El script SDK independiente también puede leer `CAMPAIGN_NAME` del entorno.
+La creación requiere primero una configuración (el `empresa_id` se toma de la
+sesión):
+
+```json
+{
+  "url_base": "https://api.higgsfield.ai",
+  "api_key": "<API Key ID>",
+  "entorno": "produccion",
+  "app_secret": "<API Key Secret>"
+}
+```
+
+Luego crea el vínculo en `empresas_integraciones` con el `integracion_id`
+correspondiente y el `configuracion_integracion_id` recién creado. Las
+conexiones con `entorno: "sandbox"` se simulan; usa `"produccion"` para que el
+backend invoque al proveedor. La API enmascara los campos secretos en las
+respuestas y los sustituye por una máscara en la bitácora. Mantén RLS
+habilitado y no entregues la service role key al cliente.
+
+Campos usados por proveedor:
+
+| Proveedor | `url_base` | `api_key` | `api_id` | `app_secret` | `access_token` |
+|-----------|------------|-----------|----------|--------------|----------------|
+| Higgsfield | `https://api.higgsfield.ai` | API Key ID | — | API Key Secret | — |
+| Meta Ads | `https://graph.facebook.com` | App ID | ID de cuenta `act_<id>` | Secreto de aplicación (si aplica) | Token con permisos de anuncios |
+
+Para Meta Ads, la configuración debe incluir `api_id` (cuenta publicitaria,
+con o sin prefijo `act_`) y `access_token`. En ambos proveedores, `entorno`
+debe ser `produccion` para llamadas reales.
+
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y, en producción,
+`SUPABASE_ANON_KEY` permanecen en variables de entorno: la API necesita esas
+credenciales para conectarse a la base de datos y leer las configuraciones.
+El catálogo vivo de `modelos_ia` lista los modelos publicados por Higgsfield y
+sus precios. Sólo los workflows registrados en `MODEL_WORKFLOWS` ejecutan
+contra el proveedor; el resto se genera en simulación.
 
 ### Publicar una campaña en Meta
 
@@ -408,9 +436,9 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 `{ "validar_solo": true }` (Meta valida sin crear nada).
 
 - Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
-- Usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID` configurados en el servidor.
-- Para publicación real: `META_SIMULATE=false`; no se usa el secreto de la app
-  ni se requiere flujo OAuth.
+- Usa las credenciales de la integración activa `Meta Ads` de la empresa; sin
+  conexión activa, el flujo permanece simulado.
+- La campaña siempre se crea en estado PAUSED y nunca inicia gasto automáticamente.
 - ✅ Migración **aplicada el 2026-10-27**: `database/migrations/2026-10-27_meta_campaign_publish.sql`
   (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`). Sin ella este
   endpoint respondía PGRST204 *"Could not find the 'meta_estado' column ...

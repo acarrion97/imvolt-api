@@ -172,7 +172,7 @@ const definitions: EntityDef[] = [
     pkExample: 2,
     properties: {
       url_base: { type: 'string', format: 'uri', maxLength: 200, example: 'https://graph.facebook.com/v21.0', description: 'URL base del proveedor' },
-      api_key: { type: 'string', writeOnly: true, maxLength: 200, example: 'sk-imvolt-9f3c…', description: 'Clave privada: se guarda cifrada y NUNCA se devuelve en las respuestas' },
+      api_key: { type: 'string', writeOnly: true, maxLength: 200, example: 'sk-imvolt-9f3c…', description: 'Clave privada; la API nunca la devuelve sin enmascarar' },
       entorno: { type: 'string', maxLength: 20, example: 'produccion', description: 'Entorno de la integración (sandbox / produccion)' },
       api_id: { type: 'string', maxLength: 100, nullable: true, example: '1029384756', description: 'ID de la aplicación del proveedor' },
       app_secret: { type: 'string', maxLength: 200, writeOnly: true, nullable: true, example: '••••', description: 'Secreto de aplicación (solo escritura)' },
@@ -775,14 +775,16 @@ Object.assign(openapiSchemas, {
     duracion_max_s: { type: 'integer', nullable: true },
     ratios: { type: 'array', items: { type: 'string' }, nullable: true },
     quote_creditos: { type: 'integer' },
+    precio_usd: { type: 'number', nullable: true },
+    precio_unidad: { type: 'string', enum: ['imagen', 'segundo'], nullable: true },
     status: { type: 'string', enum: ['activo', 'inactivo', 'no_disponible'] },
     created_at: ts('Fecha de creación'),
-  }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'quote_creditos', 'status', 'created_at'], {
+  }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'quote_creditos', 'precio_usd', 'precio_unidad', 'status', 'created_at'], {
     model_id: '1', provider: 'higgsfield', provider_model_id: 'higgsfield-ai/soul/v2/standard',
-    nombre: 'SOUL V2', media_type: 'image', capabilities: { resolution: ['720p', '1080p'] },
+    nombre: 'Soul Standard', media_type: 'image', capabilities: { resolution: ['720p', '1080p'] },
     duracion_min_s: null, duracion_max_s: null,
     ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2'],
-    quote_creditos: 2, status: 'activo',
+    quote_creditos: 10, precio_usd: 0.094, precio_unidad: 'imagen', status: 'activo',
     created_at: '2026-03-06T09:00:00.000Z',
   }, 'Modelo de IA disponible para cotización y generación'),
   Generacion: contractSchema({

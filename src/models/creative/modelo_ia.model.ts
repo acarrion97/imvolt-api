@@ -9,6 +9,9 @@ export type ModeloMediaType = 'image' | 'video';
 
 export type ModeloStatus = 'activo' | 'inactivo' | 'no_disponible';
 
+/** Unidad del precio de lista del proveedor (USD por imagen o por segundo). */
+export type ModeloPrecioUnidad = 'imagen' | 'segundo';
+
 /** Fila de `public.modelos_ia`. */
 export interface ModeloIa {
   modelo_id: number;
@@ -21,6 +24,8 @@ export interface ModeloIa {
   duracion_max_s: number | null;
   ratios: string[] | null;
   creditos_cotizacion: number;
+  precio_usd: number | null;
+  precio_unidad: ModeloPrecioUnidad | null;
   estado: ModeloStatus;
   creado_en: string;
   actualizado_en: string;
@@ -38,6 +43,8 @@ export interface ModeloIaView {
   duracion_max_s: number | null;
   ratios: string[] | null;
   quote_creditos: number;
+  precio_usd: number | null;
+  precio_unidad: ModeloPrecioUnidad | null;
   status: ModeloStatus;
   created_at: string;
 }

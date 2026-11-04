@@ -29,8 +29,8 @@ import { filterByEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
 import { translateBody, translateQuery } from '../middlewares/contract';
 import { Generacion, ESTADOS_FINALES } from '../models/creative/generacion.model';
 import { creditsService } from '../services/credits.service';
-import { higgsfieldService } from '../services/higgsfield.service';
-import { config } from '../config/global';
+import { getCompanyIntegrationConfig } from '../services/integration-config.service';
+import { HiggsfieldCredentials, higgsfieldService } from '../services/higgsfield.service';
 
 // Catálogos GLOBALES (tipos, plantillas, formatos, enfoques): sin columna de
 // empresa, compartidos por todos los tenants → escritura solo de la plataforma.
@@ -117,6 +117,41 @@ const generationFields = {
 
 const generationService = new BaseService<Generacion>('generaciones', 'generacion_id');
 
+async function higgsfieldCredentials(empresaId: string): Promise<HiggsfieldCredentials | undefined> {
+  const integration = await getCompanyIntegrationConfig(empresaId, 'Higgsfield');
+  if (!integration) return undefined;
+
+  const entorno = integration.entorno.trim().toLowerCase();
+  if (['sandbox', 'desarrollo', 'test'].includes(entorno)) return undefined;
+  if (!['produccion', 'production', 'prod'].includes(entorno)) {
+    throw new HttpError(503, 'El entorno de la conexión Higgsfield debe ser produccion o sandbox.');
+  }
+
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(integration.url_base);
+  } catch {
+    throw new HttpError(503, 'La URL de Higgsfield configurada para esta empresa no es válida.');
+  }
+  if (
+    baseUrl.protocol !== 'https:' ||
+    baseUrl.hostname !== 'api.higgsfield.ai' ||
+    baseUrl.username ||
+    baseUrl.password
+  ) {
+    throw new HttpError(503, 'La URL de Higgsfield debe ser https://api.higgsfield.ai.');
+  }
+  if (!integration.api_key?.trim() || !integration.app_secret?.trim()) {
+    throw new HttpError(503, 'La conexión activa de Higgsfield no tiene configurados el API Key ID y el secreto.');
+  }
+
+  return {
+    baseUrl: 'https://api.higgsfield.ai',
+    apiKeyId: integration.api_key,
+    apiKeySecret: integration.app_secret,
+  };
+}
+
 const generationCreate: RequestHandler = async (req, res) => {
   let generation: Generacion | undefined;
   let charged = false;
@@ -179,6 +214,7 @@ const generationCreate: RequestHandler = async (req, res) => {
       throw error;
     }
 
+    const credentials = await higgsfieldCredentials(req.organizationId);
     const job = await higgsfieldService.createJob({
       provider_model_id: model.modelo_proveedor_id,
       media_type: model.tipo_media,
@@ -187,9 +223,9 @@ const generationCreate: RequestHandler = async (req, res) => {
       duration: model.tipo_media === 'video' ? duration : undefined,
       ratio: typeof params.ratio === 'string' ? params.ratio : undefined,
       resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
-    }, String(generation.generacion_id));
+    }, String(generation.generacion_id), credentials);
 
-    const completed = config.higgsfield.simulate;
+    const completed = job.simulated === true;
     const updated = await generationService.update<Generacion>(generation.generacion_id, {
       estado: completed ? 'completed' : job.status,
       peticion_proveedor_id: job.request_id,
@@ -216,8 +252,14 @@ const generationCreate: RequestHandler = async (req, res) => {
 const generationGetById: RequestHandler = async (req, res) => {
   try {
     const generation = await generationService.getById<Generacion>(req.params.id);
+    if (String(generation.empresa_id) !== req.organizationId) {
+      throw new NotFoundError('Generación');
+    }
     if (!ESTADOS_FINALES.has(generation.estado) && generation.peticion_proveedor_id) {
-      const status = await higgsfieldService.getStatus(generation.peticion_proveedor_id);
+      const credentials = generation.peticion_proveedor_id.startsWith('sim_')
+        ? undefined
+        : await higgsfieldCredentials(String(generation.empresa_id));
+      const status = await higgsfieldService.getStatus(generation.peticion_proveedor_id, credentials);
       if (status.status === 'failed' || status.status === 'canceled') {
         const finalStatus = status.status === 'canceled' ? 'canceled' : 'failed';
         await creditsService.refund(

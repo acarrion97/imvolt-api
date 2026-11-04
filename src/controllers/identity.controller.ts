@@ -48,6 +48,7 @@ import { Rol } from '../models/identity/rol.model';
 import { UsuarioView } from '../models/identity/usuario.model';
 import { UsuarioRolView } from '../models/identity/usuario_rol.model';
 import { asegurarPropietarioRestante, exigirPropietarioParaRol, invitarMiembro, rolValido } from '../services/miembros.service';
+import { ConfiguracionIntegracionService } from '../services/configuracion-integracion.service';
 
 // Escritura en catálogos GLOBALES (roles, permisos, hitos…): compartidos por todas
 // las empresas, solo los administra la plataforma (`PLATFORM_ADMIN_EMAILS`).
@@ -408,6 +409,7 @@ export const { router: empresaHitoRouter } = createCrudRouter({
 export const { router: configuracionIntegracionRouter } = createCrudRouter({
   table: 'configuraciones_integraciones',
   primaryKey: 'configuracion_integracion_id',
+  service: new ConfiguracionIntegracionService(),
   request: configuracionIntegracionRequest,
   resource: configuracionIntegracionResource,
   entityName: 'Configuración de integración',

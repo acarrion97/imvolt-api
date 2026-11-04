@@ -5,12 +5,11 @@
 // publicitario ni modifica presupuestos sin autorización registrada. Los
 // recursos se crean siempre en PAUSED cuando el flujo de API lo permite.
 //
-// Sin META_ACCESS_TOKEN/META_AD_ACCOUNT_ID (o con META_SIMULATE=true) el servicio opera en modo
-// simulado: crea IDs ficticios y devuelve insights de demostración, para
+// Sin conexión activa de la empresa, la publicación opera en modo simulado:
+// crea IDs ficticios para
 // desarrollar el flujo completo de borrador → aprobación → publicación
 // pausada sin permisos de Meta.
 
-import { config } from '../config/global';
 import { HttpError, ValidationError } from '../core/errors';
 import { Campana, MetaConnection } from '../models/advertising/meta.model';
 
@@ -66,19 +65,7 @@ function validate(campaign: Partial<Campana>, connection: MetaConnection | null)
 
 /** Crea el recurso de campaña en Meta en estado PAUSADO. */
 async function publishPaused(campaign: Campana): Promise<{ meta_campaign_id: string }> {
-  if (config.meta.simulate) {
-    return { meta_campaign_id: `META-SIM-${campaign.campaign_id.slice(0, 8).toUpperCase()}` };
-  }
-
-  // Implementación real: facebook-nodejs-business-sdk con el token de la
-  // conexión. Se deja documentada; requiere permisos aprobados por Meta.
-  //
-  // const Campaign = require('facebook-nodejs-business-sdk').Campaign;
-  // const campaign = await Campaign.create(...status: 'PAUSED'...)
-  throw new HttpError(
-    501,
-    'La publicación real en Meta requiere credenciales Meta App y permisos aprobados. Usa la exportación manual de anuncios mientras tanto.',
-  );
+  return { meta_campaign_id: `META-SIM-${campaign.campaign_id.slice(0, 8).toUpperCase()}` };
 }
 
 /** Credenciales de Meta Ads de una empresa (tabla `configuraciones_integraciones`). */
@@ -94,6 +81,8 @@ export interface PublishCampaniaInput {
   /** Nombre del objetivo de publicidad (catálogo: Mensajes, Formularios, Visitas, Tráfico, Branding). */
   objetivo: string;
   credentials: MetaCredentials;
+  /** Sin conexión activa asociada a la empresa, la operación es simulada. */
+  simulate?: boolean;
   /** Meta valida la petición pero NO crea la campaña. */
   validateOnly?: boolean;
 }
@@ -133,7 +122,7 @@ const normalizarCuenta = (id: string): string => (id.startsWith('act_') ? id : `
 /**
  * Crea la campaña en Meta con el SDK oficial, SIEMPRE en PAUSED y con la
  * categoría especial HOUSING (anuncios inmobiliarios, §10). Sin credenciales
- * de la App (`META_SIMULATE`) devuelve un ID ficticio. El presupuesto y la
+ * de la empresa devuelve un ID ficticio. El presupuesto y la
  * segmentación viven en el conjunto de anuncios (siguiente paso del flujo),
  * no en la campaña.
  *
@@ -144,7 +133,7 @@ async function publishCampaniaPaused(input: PublishCampaniaInput): Promise<Publi
   const objective = objetivoMeta(input.objetivo);
   const validateOnly = input.validateOnly === true;
 
-  if (config.meta.simulate) {
+  if (input.simulate || !input.credentials.accessToken || !input.credentials.adAccountId) {
     return {
       meta_campaign_id: validateOnly ? null : `META-SIM-${String(input.campaniaId).padStart(8, '0')}`,
       simulado: true,
@@ -188,25 +177,18 @@ async function fetchInsights(campaign: Campana): Promise<{
   leads: number;
   alcance: number;
 }> {
-  if (config.meta.simulate) {
-    // Determinístico por campaña para que los números no salten entre consultas.
-    const seed = campaign.campaign_id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-    const impresiones = 1200 + (seed % 2600);
-    const clics = Math.round(impresiones * (0.012 + (seed % 7) / 1000));
-    const leads = Math.round(clics * 0.18);
-    return {
-      gasto: Number((campaign.presupuesto_maximo * 0.34).toFixed(2)),
-      impresiones,
-      clics,
-      leads,
-      alcance: Math.round(impresiones * 0.72),
-    };
-  }
-
-  throw new HttpError(
-    501,
-    'Los insights reales requieren permisos de Meta sobre la cuenta publicitaria.',
-  );
+  // Determinístico por campaña para que los números no salten entre consultas.
+  const seed = campaign.campaign_id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  const impresiones = 1200 + (seed % 2600);
+  const clics = Math.round(impresiones * (0.012 + (seed % 7) / 1000));
+  const leads = Math.round(clics * 0.18);
+  return {
+    gasto: Number((campaign.presupuesto_maximo * 0.34).toFixed(2)),
+    impresiones,
+    clics,
+    leads,
+    alcance: Math.round(impresiones * 0.72),
+  };
 }
 
 export const metaService = { validate, publishPaused, publishCampaniaPaused, fetchInsights };

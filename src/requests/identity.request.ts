@@ -89,7 +89,7 @@ export const empresaHitoRequest = new BaseRequest(
 // ── Configuración de integración (credenciales) ─────────────────────────────
 const configuracionIntegracionShape = {
   url_base: Joi.string().uri({ allowRelative: false }).max(200).description('URL base del proveedor'),
-  api_key: Joi.string().max(200).description('Clave privada del proveedor (solo se guarda cifrada)'),
+  api_key: Joi.string().max(200).description('Clave privada del proveedor'),
   entorno: Joi.string().max(20).description('Entorno de la integración (p. ej. sandbox / produccion)'),
   api_id: Joi.string().max(100).allow(null, '').description('ID de la aplicación del proveedor'),
   app_secret: Joi.string().max(200).allow(null, '').description('Secreto de aplicación del proveedor'),

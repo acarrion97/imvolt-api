@@ -9,11 +9,11 @@
 //   createJob(entrada)           → { request_id, status }
 //   getStatus(request_id)        → estado normalizado + URL del resultado
 //
-// Sin el ID y secreto de Higgsfield (o con HIGGSFIELD_SIMULATE=true), el
-// adaptador simula el proveedor para desarrollar sin credenciales.
+// Las credenciales de Higgsfield se resuelven desde la conexión activa de la
+// empresa. Sin conexión, el adaptador simula el proveedor.
 
 import axios from 'axios';
-import { config } from '../config/global';
+import { HttpError } from '../core/errors';
 import { MediaType } from '../models/creative/media.model';
 
 export interface HiggsfieldQuote {
@@ -37,6 +37,13 @@ export interface HiggsfieldJobStatus {
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
   result_url?: string;
   error?: string;
+  simulated?: boolean;
+}
+
+export interface HiggsfieldCredentials {
+  baseUrl: string;
+  apiKeyId: string;
+  apiKeySecret: string;
 }
 
 interface ProviderStatusResponse {
@@ -56,11 +63,6 @@ interface SimulatedJob {
 const simulatedJobs = new Map<string, SimulatedJob>();
 const SIMULATED_LATENCY_MS = 8000;
 const BASE_CREDITS = { image: 1, video: 3 } as const;
-
-const client = axios.create({
-  baseURL: config.higgsfield.baseUrl,
-  timeout: 30000,
-});
 
 const MODEL_WORKFLOWS: Record<string, { endpoint: string; mediaType: MediaType }> = {
   'higgsfield-ai/soul/v2/standard': {
@@ -82,9 +84,9 @@ const MODEL_WORKFLOWS: Record<string, { endpoint: string; mediaType: MediaType }
   },
 };
 
-function providerHeaders(idempotencyKey?: string) {
+function providerHeaders(credentials: HiggsfieldCredentials, idempotencyKey?: string) {
   return {
-    Authorization: `Key ${config.higgsfield.apiKeyId}:${config.higgsfield.apiKeySecret}`,
+    Authorization: `Key ${credentials.apiKeyId}:${credentials.apiKeySecret}`,
     ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
   };
 }
@@ -121,11 +123,12 @@ function quote(
 async function createJob(
   request: HiggsfieldJobRequest,
   idempotencyKey?: string,
+  credentials?: HiggsfieldCredentials,
 ): Promise<HiggsfieldJobStatus> {
-  if (config.higgsfield.simulate) {
+  if (!credentials) {
     const requestId = `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     simulatedJobs.set(requestId, { createdAt: Date.now(), request });
-    return { request_id: requestId, status: 'queued' };
+    return { request_id: requestId, status: 'queued', simulated: true };
   }
 
   const workflow = MODEL_WORKFLOWS[request.provider_model_id];
@@ -148,20 +151,26 @@ async function createJob(
   }
 
   try {
-    const { data } = await client.post<{ request_id: string; status: string }>(
-      `/${workflow.endpoint}`,
+    const { data } = await axios.post<{ request_id: string; status: string }>(
+      `${credentials.baseUrl.replace(/\/+$/, '')}/${workflow.endpoint}`,
       payload,
-      { headers: { ...providerHeaders(idempotencyKey), 'Content-Type': 'application/json' } },
+      {
+        timeout: 30000,
+        headers: { ...providerHeaders(credentials, idempotencyKey), 'Content-Type': 'application/json' },
+      },
     );
     if (!data.request_id) throw new Error('Higgsfield no devolvió request_id al aceptar la generación.');
-    return { request_id: data.request_id, status: 'queued' };
+    return { request_id: data.request_id, status: 'queued', simulated: false };
   } catch (error) {
     providerError(error, 'createJob');
   }
 }
 
-async function getStatus(requestId: string): Promise<HiggsfieldJobStatus> {
-  if (config.higgsfield.simulate) {
+async function getStatus(
+  requestId: string,
+  credentials?: HiggsfieldCredentials,
+): Promise<HiggsfieldJobStatus> {
+  if (requestId.startsWith('sim_')) {
     const job = simulatedJobs.get(requestId);
     if (!job) return { request_id: requestId, status: 'failed', error: 'Job simulado desconocido' };
 
@@ -173,16 +182,21 @@ async function getStatus(requestId: string): Promise<HiggsfieldJobStatus> {
     return {
       request_id: requestId,
       status: 'completed',
+      simulated: true,
       // Placeholder estable: en producción se reemplaza por la descarga a
       // storage propio (§09, paso 6).
       result_url: `https://placehold.co/1200x675/101719/00D94B?text=IMVOLT+${kind.toUpperCase()}+demo`,
     };
   }
 
+  if (!credentials) {
+    throw new HttpError(503, 'La conexión de Higgsfield de esta empresa no está configurada o activa.');
+  }
+
   try {
-    const { data } = await client.get<ProviderStatusResponse>(
-      `/requests/${encodeURIComponent(requestId)}/status`,
-      { headers: providerHeaders() },
+    const { data } = await axios.get<ProviderStatusResponse>(
+      `${credentials.baseUrl.replace(/\/+$/, '')}/requests/${encodeURIComponent(requestId)}/status`,
+      { timeout: 30000, headers: providerHeaders(credentials) },
     );
     const statusMap: Record<string, HiggsfieldJobStatus['status']> = {
       queued: 'queued',

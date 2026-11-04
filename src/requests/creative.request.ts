@@ -74,6 +74,8 @@ const modeloIaShape = {
   duracion_max_s: Joi.number().integer().positive().allow(null),
   ratios: Joi.array().items(Joi.string()).allow(null),
   creditos_cotizacion: Joi.number().integer().min(0),
+  precio_usd: Joi.number().min(0).precision(4).allow(null).description('Precio de lista en USD (por imagen o por segundo)'),
+  precio_unidad: Joi.string().valid('imagen', 'segundo').allow(null).description('Unidad del precio de lista'),
   estado: Joi.string().valid('activo', 'inactivo', 'no_disponible'),
 };
 

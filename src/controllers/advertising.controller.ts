@@ -5,8 +5,8 @@ import { Request, Response } from 'express';
 import supabase from '../config/supabaseClient';
 import { createCrudRouter } from '../core/crud.factory';
 import { errorResponse, HttpError, NotFoundError, ValidationError } from '../core/errors';
-import { config } from '../config/global';
 import { logAudit } from '../services/audit.service';
+import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
 import {
   campaignRequest,
@@ -113,12 +113,21 @@ export const { router: campaignRouter } = createCrudRouter({
 
 // ── Publicación en Meta ─────────────────────────────────────────────────────
 
-/** Credenciales configuradas solo en el entorno del servidor. */
-function credencialesMeta(): MetaCredentials | null {
-  if (!config.meta.accessToken || !config.meta.adAccountId) return null;
+/** Credenciales de Meta de la integración activa de la empresa. */
+async function credencialesMeta(empresaId: string): Promise<MetaCredentials | null> {
+  const integration = await getCompanyIntegrationConfig(empresaId, 'Meta Ads');
+  if (!integration) return null;
+  const entorno = integration.entorno.trim().toLowerCase();
+  if (['sandbox', 'desarrollo', 'test'].includes(entorno)) return null;
+  if (!['produccion', 'production', 'prod'].includes(entorno)) {
+    throw new HttpError(503, 'El entorno de la conexión Meta Ads debe ser produccion o sandbox.');
+  }
+  if (!integration.api_id?.trim() || !integration.access_token?.trim()) {
+    throw new HttpError(503, 'La conexión activa de Meta Ads no tiene configurados el ID de cuenta y el token.');
+  }
   return {
-    adAccountId: config.meta.adAccountId,
-    accessToken: config.meta.accessToken,
+    adAccountId: integration.api_id,
+    accessToken: integration.access_token,
   };
 }
 
@@ -152,17 +161,14 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       throw new ValidationError('El presupuesto diario debe ser mayor a cero');
     }
 
-    const credentials = credencialesMeta();
-    if (!credentials && !config.meta.simulate) {
-      throw new HttpError(503, 'Configura META_ACCESS_TOKEN y META_AD_ACCOUNT_ID en el entorno seguro del backend', [
-        { field: 'integracion', message: 'No se encontró el token de acceso ni la cuenta publicitaria del servidor' },
-      ]);
-    }
+    const credentials = await credencialesMeta(req.organizationId as string);
+    const simulate = credentials === null;
     const input = {
       campaniaId: id,
       nombre: String(campania.nombre),
       objetivo: String(campania.objetivo_publicidad?.nombre ?? ''),
       credentials: credentials ?? { adAccountId: '', accessToken: '' },
+      simulate,
     };
 
     if (validarSolo) {

@@ -17,9 +17,6 @@ const JWT_SHAPE = /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/;
 const SERVICE_KEY_SHAPE = (value: string): boolean => JWT_SHAPE.test(value) || value.startsWith('sb_secret_');
 const ANON_KEY_SHAPE = (value: string): boolean => JWT_SHAPE.test(value) || value.startsWith('sb_publishable_');
 
-const isTrue = (value: string | undefined, fallback: boolean): boolean =>
-  value === undefined || value.trim() === '' ? fallback : value.trim().toLowerCase() === 'true';
-
 const parseUrl = (value: string): URL | null => {
   try {
     return new URL(value);
@@ -78,42 +75,6 @@ export function validateEnv(env: Env): EnvReport {
     }
   }
   if (prod && origins.length === 0) errors.push('ALLOWED_ORIGIN es obligatoria en producción.');
-
-  // ── Higgsfield / Meta: si NO se simula, las credenciales son obligatorias ──
-  const higgsfieldKeyId = get('HIGGSFIELD_API_KEY_ID');
-  const higgsfieldKeySecret = get('HIGGSFIELD_API_KEY_SECRET');
-  const hasHiggsfieldCredentials = higgsfieldKeyId !== '' && higgsfieldKeySecret !== '';
-  if ((higgsfieldKeyId === '') !== (higgsfieldKeySecret === '')) {
-    errors.push('HIGGSFIELD_API_KEY_ID y HIGGSFIELD_API_KEY_SECRET deben configurarse juntos.');
-  }
-  const higgsfieldSimulate = isTrue(env.HIGGSFIELD_SIMULATE, true) || !hasHiggsfieldCredentials;
-  if (!isTrue(env.HIGGSFIELD_SIMULATE, true) && !hasHiggsfieldCredentials) {
-    errors.push('HIGGSFIELD_SIMULATE=false requiere HIGGSFIELD_API_KEY_ID y HIGGSFIELD_API_KEY_SECRET.');
-  }
-  const higgsfieldUrl = get('HIGGSFIELD_BASE_URL');
-  if (higgsfieldUrl && parseUrl(higgsfieldUrl)?.protocol !== 'https:') {
-    errors.push('HIGGSFIELD_BASE_URL debe ser una URL https://.');
-  }
-
-  const directMetaToken = get('META_ACCESS_TOKEN');
-  const directMetaAccount = get('META_AD_ACCOUNT_ID');
-  const directMetaCreds = directMetaToken !== '' && directMetaAccount !== '';
-  if ((directMetaToken === '') !== (directMetaAccount === '')) {
-    errors.push('META_ACCESS_TOKEN y META_AD_ACCOUNT_ID deben configurarse juntos para publicación directa.');
-  }
-  if (directMetaAccount && !/^act_[0-9]+$/.test(directMetaAccount)) {
-    errors.push('META_AD_ACCOUNT_ID debe tener formato act_<dígitos>.');
-  }
-  if (!isTrue(env.META_SIMULATE, true) && !directMetaCreds) {
-    errors.push('META_SIMULATE=false requiere META_ACCESS_TOKEN y META_AD_ACCOUNT_ID.');
-  }
-  if (get('META_API_VERSION') && !/^v\d+\.\d+$/.test(get('META_API_VERSION'))) {
-    errors.push('META_API_VERSION debe tener la forma "v21.0".');
-  }
-
-  if (prod && (higgsfieldSimulate || !directMetaCreds || isTrue(env.META_SIMULATE, true))) {
-    warnings.push('Producción con Higgsfield o Meta en MODO SIMULADO: revisa HIGGSFIELD_* / META_*.');
-  }
 
   // ── Red / HTTPS ────────────────────────────────────────────────────────────
   const publicUrl = get('PUBLIC_API_URL');

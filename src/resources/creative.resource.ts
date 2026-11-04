@@ -25,6 +25,8 @@ export const modeloResource = new BaseResource<any, ModeloIaView>((row) => ({
   duracion_max_s: row.duracion_max_s ?? null,
   ratios: row.ratios ?? null,
   quote_creditos: Number(row.creditos_cotizacion),
+  precio_usd: row.precio_usd == null ? null : Number(row.precio_usd),
+  precio_unidad: row.precio_unidad ?? null,
   status: row.estado,
   created_at: new Date(row.creado_en).toISOString(),
 }));

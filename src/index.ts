@@ -83,10 +83,7 @@ app.get('/api/health', (_req, res) => {
     service: 'imvolt-api',
     brand: 'IMVOLT — MARKETING INMOBILIARIO AI',
     status: 'ok',
-    simulated: {
-      higgsfield: config.higgsfield.simulate,
-      meta: config.meta.simulate,
-    },
+    integrationConfig: 'company_scoped',
     time: new Date().toISOString(),
   });
 });
@@ -222,8 +219,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 app.listen(config.port, () => {
   console.log(`IMVOLT API escuchando en http://localhost:${config.port}`);
   if (config.enableDocs) console.log(`Documentación: http://localhost:${config.port}/documentacion`);
-  if (config.higgsfield.simulate) console.log('Higgsfield: MODO SIMULADO (sin API key)');
-  if (config.meta.simulate) console.log('Meta: MODO SIMULADO (sin credenciales; solo borradores)');
+  console.log('Higgsfield y Meta: credenciales resueltas desde las conexiones activas por empresa.');
   // Bucket privado del Brand Kit: lo crea/ajusta (10 MB + MIME) sin bloquear el arranque.
   void asegurarBucket();
   // Bucket privado de Media Assets: lo crea/ajusta (100 MB + MIME) sin bloquear el arranque.

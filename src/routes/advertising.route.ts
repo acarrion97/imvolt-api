@@ -18,8 +18,8 @@ export {
  *       Crea la campaña en la cuenta de Meta Ads de la empresa con el SDK
  *       oficial: estado `PAUSED` y categoría especial `HOUSING`. **Nunca activa
  *       gasto**; el presupuesto y la segmentación se definen después en el
- *       conjunto de anuncios. Usa `META_ACCESS_TOKEN` y `META_AD_ACCOUNT_ID`
- *       configurados únicamente en el backend. Requiere rol propietario,
+ *       conjunto de anuncios. Usa la conexión activa de Meta Ads de la empresa.
+ *       Requiere rol propietario,
  *       administrador o marketing con el permiso `gestionar_campanas`.
  *     tags: [Publicidad]
  *     parameters:

@@ -11,14 +11,6 @@ export const {
   SUPABASE_URL = '',
   SUPABASE_SERVICE_ROLE_KEY = '',
   SUPABASE_ANON_KEY = '',
-  HIGGSFIELD_BASE_URL = 'https://api.higgsfield.ai',
-  HIGGSFIELD_API_KEY_ID = '',
-  HIGGSFIELD_API_KEY_SECRET = '',
-  HIGGSFIELD_SIMULATE = 'true',
-  META_ACCESS_TOKEN = '',
-  META_AD_ACCOUNT_ID = '',
-  META_API_VERSION = 'v21.0',
-  META_SIMULATE = 'true',
   DEFAULT_ORGANIZATION_ID = '',
   PUBLIC_API_URL = '',
   TRUST_PROXY = '',
@@ -70,20 +62,5 @@ export const config = {
     serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
     /** Clave pública: la usa el login para no ejecutar signInWithPassword con la service role. */
     anonKey: SUPABASE_ANON_KEY,
-  },
-  higgsfield: {
-    baseUrl: HIGGSFIELD_BASE_URL.replace(/\/+$/, ''),
-    apiKeyId: HIGGSFIELD_API_KEY_ID,
-    apiKeySecret: HIGGSFIELD_API_KEY_SECRET,
-    /** Sin API key la generación se simula para poder desarrollar el MVP. */
-    simulate: asBool(HIGGSFIELD_SIMULATE, true) ||
-      HIGGSFIELD_API_KEY_ID === '' || HIGGSFIELD_API_KEY_SECRET === '',
-  },
-  meta: {
-    accessToken: META_ACCESS_TOKEN,
-    adAccountId: META_AD_ACCOUNT_ID,
-    apiVersion: META_API_VERSION,
-    /** Sin token y cuenta publicitaria se trabaja en modo simulado. */
-    simulate: asBool(META_SIMULATE, true) || META_ACCESS_TOKEN === '' || META_AD_ACCOUNT_ID === '',
   },
 };
