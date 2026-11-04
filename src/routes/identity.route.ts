@@ -76,3 +76,20 @@ export {
   usuarioRolRouter,
   usuarioRouter,
 } from '../controllers/identity.controller';
+
+/**
+ * @swagger
+ * /api/v1/integraciones:
+ *   get:
+ *     summary: Lista los proveedores disponibles para conectar
+ *     tags: [Identidad]
+ *     responses:
+ *       200:
+ *         description: Catálogo global de proveedores habilitados
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items: { $ref: '#/components/schemas/Integracion' }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
