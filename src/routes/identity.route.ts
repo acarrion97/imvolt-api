@@ -69,6 +69,7 @@ export {
   empresaIntegracionRouter,
   empresaRouter,
   hitoLanzamientoRouter,
+  integracionRouter,
   permisoRouter,
   rolPermisoRouter,
   rolRouter,

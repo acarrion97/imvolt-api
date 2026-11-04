@@ -32,6 +32,7 @@ import {
   empresaIntegracionRouter,
   empresaRouter,
   hitoLanzamientoRouter,
+  integracionRouter,
   permisoRouter,
   rolPermisoRouter,
   rolRouter,
@@ -100,6 +101,7 @@ app.use('/api/v1/roles-usuarios', usuarioRolRouter);
 app.use('/api/v1/roles-permisos', rolPermisoRouter);
 app.use('/api/v1/hitos-lanzamiento', hitoLanzamientoRouter);
 app.use('/api/v1/empresas-hitos', empresaHitoRouter);
+app.use('/api/v1/integraciones', integracionRouter);
 app.use('/api/v1/configuraciones-integraciones', configuracionIntegracionRouter);
 app.use('/api/v1/empresas-integraciones', empresaIntegracionRouter);
 app.use('/api/v1/auditoria', auditLogRouter);

@@ -35,6 +35,7 @@ import {
   empresaIntegracionResource,
   empresaResource,
   hitoLanzamientoResource,
+  integracionResource,
   permisoResource,
   rolPermisoResource,
   rolResource,
@@ -406,6 +407,16 @@ export const { router: empresaHitoRouter } = createCrudRouter({
 });
 
 // ── Configuración de integración ────────────────────────────────────────────
+export const { router: integracionRouter } = createCrudRouter({
+  table: 'integraciones',
+  primaryKey: 'integracion_id',
+  resource: integracionResource,
+  entityName: 'Integración',
+  middlewares: [...requireOrg],
+  disabled: ['create', 'update', 'remove'],
+  defaultGetAllOptions: { orderBy: 'nombre', ascending: true },
+});
+
 export const { router: configuracionIntegracionRouter } = createCrudRouter({
   table: 'configuraciones_integraciones',
   primaryKey: 'configuracion_integracion_id',
