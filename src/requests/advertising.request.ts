@@ -65,6 +65,13 @@ const campaniaShape = {
   copy_anuncio: Joi.string().min(10).max(500).optional().allow(null).description('Texto del anuncio (viene como `copy`)'),
   cta: Joi.string().max(60).optional().allow(null).description('Call to action del anuncio'),
   creative_url: Joi.string().uri({ allowRelative: true }).optional().allow(null).description('URL del creativo generado'),
+  meta_page_id: Joi.string().max(100).optional().allow(null),
+  meta_page_name: Joi.string().max(120).optional().allow(null),
+  target_location_key: Joi.string().max(100).optional().allow(null),
+  target_location_name: Joi.string().max(160).optional().allow(null),
+  target_location_country_code: Joi.string().length(2).uppercase().optional().allow(null),
+  privacy_policy_url: Joi.string().uri({ scheme: ['http', 'https'] }).optional().allow(null),
+  media_type: Joi.string().valid('image', 'video').optional().allow(null),
 };
 
 const campaignSchemas = buildSchemas(campaniaShape, {

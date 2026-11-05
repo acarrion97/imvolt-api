@@ -23,11 +23,25 @@ interface MetaAdAccount {
   id: string;
   name: string;
   account_status: number;
+  currency: string;
 }
 
 interface MetaAdAccountsResponse {
   data: MetaAdAccount[];
   paging?: { cursors?: { after?: string } };
+}
+
+export interface MetaPage {
+  id: string;
+  name: string;
+}
+
+export interface MetaAdLocation {
+  key: string;
+  name: string;
+  region?: string;
+  country_name?: string;
+  country_code?: string;
 }
 
 interface MetaUserResponse {
@@ -194,12 +208,55 @@ export async function exchangeMetaSdkToken(
     throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
   }
   const scopes = new Set(debug.scopes ?? []);
-  const missingScopes = ['ads_management', 'ads_read'].filter((scope) => !scopes.has(scope));
+  const missingScopes = ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads']
+    .filter((scope) => !scopes.has(scope));
   if (missingScopes.length) {
-    throw new HttpError(403, 'La autorización no incluye todos los permisos de anuncios requeridos.');
+    throw new HttpError(
+      403,
+      'La autorización necesita ads_management, ads_read, pages_show_list y pages_manage_ads. Actualiza la configuración de Facebook Login for Business y vuelve a conectar Meta.',
+    );
   }
 
   return persistMetaToken(oauthState.empresaId, accessToken, debug.user_id);
+}
+
+export async function listMetaPages(accessToken: string): Promise<MetaPage[]> {
+  const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
+  try {
+    const { data } = await axios.get<{ data: MetaPage[] }>(`${graphUrl}/me/accounts`, {
+      params: { fields: 'id,name', limit: 100, access_token: accessToken },
+      timeout: 15000,
+    });
+    return (data.data ?? []).filter((page) => page.id && page.name);
+  } catch {
+    throw new HttpError(
+      502,
+      'No se pudieron leer las páginas de Facebook. Verifica que la autorización incluya pages_show_list.',
+    );
+  }
+}
+
+export async function searchMetaAdLocations(
+  accessToken: string,
+  query: string,
+): Promise<MetaAdLocation[]> {
+  const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
+  try {
+    const { data } = await axios.get<{ data: MetaAdLocation[] }>(`${graphUrl}/search`, {
+      params: {
+        type: 'adgeolocation',
+        q: query,
+        location_types: JSON.stringify(['city']),
+        fields: 'key,name,region,country_name,country_code',
+        limit: 20,
+        access_token: accessToken,
+      },
+      timeout: 15000,
+    });
+    return (data.data ?? []).filter((location) => location.key && location.name);
+  } catch {
+    throw new HttpError(502, 'Meta no pudo buscar ubicaciones para la segmentación inmobiliaria.');
+  }
 }
 
 async function persistMetaToken(
@@ -240,7 +297,7 @@ async function persistMetaToken(
     try {
       const { data } = await axios.get<MetaAdAccountsResponse>(`${graphUrl}/me/adaccounts`, {
         params: {
-          fields: 'id,name,account_status',
+          fields: 'id,name,account_status,currency',
           limit: 100,
           access_token: accessToken,
           ...(after ? { after } : {}),
@@ -356,8 +413,9 @@ export async function saveMetaConnections(input: Awaited<ReturnType<typeof excha
       meta_user_id: input.metaUserId,
       cuenta_publicitaria_id: account.id,
       nombre_cuenta: account.name,
+      meta_currency: account.currency,
       estado: 'conectada',
-      permisos: { scopes: ['ads_management', 'ads_read'] },
+      permisos: { scopes: ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads'] },
       access_token_enc: input.encryptedToken,
       token_expira_en: input.expiresAt,
       actualizado_en: new Date().toISOString(),

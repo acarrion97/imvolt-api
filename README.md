@@ -408,7 +408,8 @@ cuentas invalida los tokens ya cifrados.
 `META_APP_ID` es el identificador público. Configúralo en el `.env` del
 frontend y como variable de build en Vercel. En el panel Business Login de Meta
 crea una configuración para los permisos publicitarios que necesita la
-integración (`ads_management` y `ads_read`) y define su ID en
+integración (`ads_management`, `ads_read`, `pages_show_list` y
+`pages_manage_ads`) y define su ID en
 `META_LOGIN_CONFIG_ID`, tanto localmente como en las variables de build de
 Vercel. Configura `META_GRAPH_API_VERSION` en el frontend y el backend con la
 misma versión. Nunca pongas `META_APP_SECRET` ni `META_TOKEN_ENCRYPTION_KEY`
@@ -453,10 +454,22 @@ la conexión desde Configuración de IMVOLT; no debe escribir su contraseña de
 Facebook dentro de IMVOLT.
 
 La app de Meta debe estar en modo **Live** y contar con acceso avanzado/revisión
-para los permisos de anuncios solicitados (`ads_management` y `ads_read`) antes
-de conectar usuarios que no sean roles de la app. Cada persona solo podrá
-seleccionar cuentas publicitarias a las que su propio Facebook tenga acceso.
-La conexión guarda las cuentas activas encontradas en esa autorización.
+para los permisos solicitados antes de conectar usuarios que no sean roles de
+la app. La conexión también necesita `pages_show_list` para escoger la página y
+`pages_manage_ads` para crear el formulario instantáneo. Después de añadir esos
+permisos a la configuración Business Login, los usuarios deben volver a
+conectar Meta para otorgarlos. Ejecuta la migración de anuncios y vuelve a
+conectar las cuentas existentes para guardar su moneda de facturación. Cada persona solo podrá seleccionar cuentas
+publicitarias y páginas a las que su Facebook tenga acceso.
+
+Desde Estudio, una generación completada puede convertirse en un anuncio de
+formulario: el usuario elige cuenta y página, ciudad disponible en Meta,
+presupuesto diario en la moneda de la cuenta, periodo, título, texto y URL HTTPS
+de privacidad. IMVOLT crea el formulario instantáneo con nombre, correo y
+teléfono, sube el creativo desde la URL pública de Higgsfield y crea campaña,
+conjunto y anuncio pausados. Meta no inicia gasto hasta que se active el anuncio
+desde Meta Ads Manager. Antes de probarlo, ejecuta
+`database/migrations/2026-11-05_06_meta_lead_ads.sql`.
 
 ### Configurar Higgsfield
 

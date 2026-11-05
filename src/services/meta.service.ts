@@ -11,7 +11,9 @@
 // pausada sin permisos de Meta.
 
 import { HttpError, ValidationError } from '../core/errors';
+import { config } from '../config/global';
 import { Campana, MetaConnection } from '../models/advertising/meta.model';
+import axios from 'axios';
 
 export interface ValidationResult {
   valido: boolean;
@@ -73,6 +75,7 @@ export interface MetaCredentials {
   /** Cuenta publicitaria; se normaliza al formato `act_<id>`. */
   adAccountId: string;
   accessToken: string;
+  currency?: string;
 }
 
 export interface PublishCampaniaInput {
@@ -85,6 +88,20 @@ export interface PublishCampaniaInput {
   simulate?: boolean;
   /** Meta valida la petición pero NO crea la campaña. */
   validateOnly?: boolean;
+  leadAd?: {
+    pageId: string;
+    locationKey: string;
+    locationCountryCode: string;
+    privacyPolicyUrl: string;
+    mediaUrl: string;
+    mediaType: 'image' | 'video';
+    dailyBudget: number;
+    currency: string;
+    startAt: string;
+    endAt: string;
+    title: string;
+    copy: string;
+  };
 }
 
 export interface PublishCampaniaResult {
@@ -92,6 +109,10 @@ export interface PublishCampaniaResult {
   meta_campaign_id: string | null;
   simulado: boolean;
   validado_solo: boolean;
+  meta_adset_id?: string | null;
+  meta_adcreative_id?: string | null;
+  meta_ad_id?: string | null;
+  meta_lead_form_id?: string | null;
 }
 
 /** Objetivo del catálogo IMVOLT → objetivo ODAX de Meta. */
@@ -119,6 +140,248 @@ function objetivoMeta(objetivo: string): string {
 
 const normalizarCuenta = (id: string): string => (id.startsWith('act_') ? id : `act_${id}`);
 
+interface MetaObjectResponse {
+  id: string;
+}
+
+interface MetaImageUploadResponse {
+  images?: Record<string, { hash?: string }>;
+}
+
+interface MetaVideoUploadResponse {
+  id?: string;
+}
+
+function graphBaseUrl(): string {
+  return `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
+}
+
+async function graphCreate<T>(
+  path: string,
+  accessToken: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  try {
+    const body = new URLSearchParams({ access_token: accessToken });
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null) body.set(key, String(value));
+    }
+    const { data } = await axios.post<T>(`${graphBaseUrl()}/${path}`, body, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 60000,
+    });
+    return data;
+  } catch (error) {
+    const meta = (error as {
+      response?: { data?: { error?: { message?: string; code?: number } } };
+    }).response?.data?.error;
+    console.error('[meta] creación de anuncio falló', meta?.code ?? 'sin código');
+    throw new HttpError(502, `Meta rechazó la creación del anuncio: ${meta?.message ?? 'error desconocido'}`);
+  }
+}
+
+async function deleteMetaObject(path: string, accessToken: string): Promise<void> {
+  try {
+    await axios.post(
+      `${graphBaseUrl()}/${path}`,
+      new URLSearchParams({ status: 'DELETED', access_token: accessToken }),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 15000,
+      },
+    );
+  } catch (error) {
+    const meta = (error as {
+      response?: { data?: { error?: { code?: number } } };
+    }).response?.data?.error;
+    console.error('[meta] no se pudo limpiar objeto pausado tras fallo', meta?.code ?? 'sin código');
+  }
+}
+
+async function waitForMetaVideo(videoId: string, accessToken: string): Promise<void> {
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    let status: { status?: { video_status?: string } };
+    try {
+      const { data } = await axios.get<{ status?: { video_status?: string } }>(
+        `${graphBaseUrl()}/${encodeURIComponent(videoId)}`,
+        { params: { fields: 'status', access_token: accessToken }, timeout: 15000 },
+      );
+      status = data;
+    } catch (error) {
+      const meta = (error as {
+        response?: { data?: { error?: { message?: string; code?: number } } };
+      }).response?.data?.error;
+      console.error('[meta] no se pudo consultar procesamiento del video', meta?.code ?? 'sin código');
+      throw new HttpError(502, 'Meta no pudo comprobar el procesamiento del video.');
+    }
+    if (status.status?.video_status === 'ready') return;
+    if (status.status?.video_status === 'error') {
+      throw new HttpError(502, 'Meta no pudo procesar el video generado.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new HttpError(504, 'Meta aún está procesando el video. Intenta publicar de nuevo más tarde.');
+}
+
+async function createPausedLeadAd(input: PublishCampaniaInput): Promise<PublishCampaniaResult> {
+  const leadAd = input.leadAd;
+  if (!leadAd) throw new ValidationError('Faltan datos para crear el anuncio de formulario.');
+  if (!/^[A-Z]{3}$/.test(leadAd.currency)) {
+    throw new ValidationError('La moneda de la cuenta publicitaria no es válida. Vuelve a conectar Meta.');
+  }
+  if (
+    !/^\d{1,30}$/.test(leadAd.pageId) ||
+    !/^\d{1,30}$/.test(leadAd.locationKey) ||
+    !/^[A-Z]{2}$/.test(leadAd.locationCountryCode)
+  ) {
+    throw new ValidationError('La página o ubicación seleccionada no tiene un identificador de Meta válido.');
+  }
+  let fractionDigits: number;
+  try {
+    fractionDigits = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: leadAd.currency,
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    throw new ValidationError('La moneda de la cuenta publicitaria no es compatible.');
+  }
+  if (!Number.isFinite(leadAd.dailyBudget) || leadAd.dailyBudget < 2) {
+    throw new ValidationError(`El presupuesto diario mínimo es 2 ${leadAd.currency}.`);
+  }
+  if (!/^https:\/\//i.test(leadAd.mediaUrl) || !/^https:\/\//i.test(leadAd.privacyPolicyUrl)) {
+    throw new ValidationError('El creativo y la política de privacidad deben usar URLs públicas HTTPS.');
+  }
+  const startTime = Date.parse(leadAd.startAt);
+  const endTime = Date.parse(leadAd.endAt);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime || startTime <= Date.now()) {
+    throw new ValidationError('El inicio debe ser futuro y la fecha final posterior al inicio.');
+  }
+  if (input.validateOnly) {
+    return { meta_campaign_id: null, simulado: false, validado_solo: true };
+  }
+
+  const accountId = normalizarCuenta(input.credentials.adAccountId);
+  const token = input.credentials.accessToken;
+  const created: string[] = [];
+  let campaignId: string | null = null;
+  try {
+    const campaign = await graphCreate<MetaObjectResponse>(`${accountId}/campaigns`, token, {
+      name: input.nombre,
+      objective: 'OUTCOME_LEADS',
+      status: 'PAUSED',
+      special_ad_categories: JSON.stringify(['HOUSING']),
+      special_ad_category_country: JSON.stringify([leadAd.locationCountryCode]),
+      is_adset_budget_sharing_enabled: false,
+    });
+    if (!campaign.id) throw new Error('Meta no devolvió el ID de campaña.');
+    campaignId = campaign.id;
+    created.push(campaign.id);
+
+    const form = await graphCreate<MetaObjectResponse>(`${leadAd.pageId}/leadgen_forms`, token, {
+      name: `${input.nombre} — formulario`,
+      privacy_policy: JSON.stringify({
+        url: leadAd.privacyPolicyUrl,
+        link_text: 'Política de privacidad',
+      }),
+      questions: JSON.stringify([{ type: 'FULL_NAME' }, { type: 'EMAIL' }, { type: 'PHONE' }]),
+    });
+    if (!form.id) throw new Error('Meta no devolvió el ID del formulario instantáneo.');
+    created.push(form.id);
+
+    let imageHash: string | undefined;
+    let videoId: string | undefined;
+    if (leadAd.mediaType === 'image') {
+      const uploaded = await graphCreate<MetaImageUploadResponse>(`${accountId}/adimages`, token, {
+        url: leadAd.mediaUrl,
+      });
+      imageHash = Object.values(uploaded.images ?? {})[0]?.hash;
+      if (!imageHash) throw new Error('Meta no devolvió el hash de la imagen.');
+    } else {
+      const uploaded = await graphCreate<MetaVideoUploadResponse>(`${accountId}/advideos`, token, {
+        file_url: leadAd.mediaUrl,
+        title: leadAd.title,
+      });
+      videoId = uploaded.id;
+      if (!videoId) throw new Error('Meta no devolvió el ID del video.');
+      await waitForMetaVideo(videoId, token);
+    }
+
+    const adSet = await graphCreate<MetaObjectResponse>(`${accountId}/adsets`, token, {
+      name: `${input.nombre} — conjunto`,
+      campaign_id: campaign.id,
+      daily_budget: String(Math.round(leadAd.dailyBudget * (10 ** fractionDigits))),
+      billing_event: 'IMPRESSIONS',
+      optimization_goal: 'LEAD_GENERATION',
+      destination_type: 'ON_AD',
+      start_time: leadAd.startAt,
+      end_time: leadAd.endAt,
+      targeting: JSON.stringify({ geo_locations: { cities: [{ key: leadAd.locationKey }] } }),
+      promoted_object: JSON.stringify({ page_id: leadAd.pageId }),
+      status: 'PAUSED',
+    });
+    if (!adSet.id) throw new Error('Meta no devolvió el ID del conjunto de anuncios.');
+    created.push(adSet.id);
+
+    const creativeSpec = leadAd.mediaType === 'image'
+      ? {
+          page_id: leadAd.pageId,
+          link_data: {
+            image_hash: imageHash,
+            link: 'https://www.facebook.com/',
+            message: leadAd.copy,
+            name: leadAd.title,
+            call_to_action: {
+              type: 'SIGN_UP',
+              value: { lead_gen_form_id: form.id },
+            },
+          },
+        }
+      : {
+          page_id: leadAd.pageId,
+          video_data: {
+            video_id: videoId,
+            message: leadAd.copy,
+            title: leadAd.title,
+            call_to_action: {
+              type: 'SIGN_UP',
+              value: { lead_gen_form_id: form.id },
+            },
+          },
+        };
+    const creative = await graphCreate<MetaObjectResponse>(`${accountId}/adcreatives`, token, {
+      name: `${input.nombre} — creativo`,
+      object_story_spec: JSON.stringify(creativeSpec),
+    });
+    if (!creative.id) throw new Error('Meta no devolvió el ID del creativo.');
+    created.push(creative.id);
+
+    const ad = await graphCreate<MetaObjectResponse>(`${accountId}/ads`, token, {
+      name: input.nombre,
+      adset_id: adSet.id,
+      creative: JSON.stringify({ creative_id: creative.id }),
+      status: 'PAUSED',
+    });
+    if (!ad.id) throw new Error('Meta no devolvió el ID del anuncio.');
+    created.push(ad.id);
+
+    return {
+      meta_campaign_id: campaign.id,
+      meta_adset_id: adSet.id,
+      meta_adcreative_id: creative.id,
+      meta_ad_id: ad.id,
+      meta_lead_form_id: form.id,
+      simulado: false,
+      validado_solo: false,
+    };
+  } catch (error) {
+    for (const id of created.reverse()) {
+      await deleteMetaObject(id, token);
+    }
+    if (error instanceof HttpError || error instanceof ValidationError) throw error;
+    throw new HttpError(502, `No se pudo completar la creación del anuncio${campaignId ? ` (campaña ${campaignId})` : ''}. Los objetos pausados se limpiaron cuando fue posible.`);
+  }
+}
+
 /**
  * Crea la campaña en Meta con el SDK oficial, SIEMPRE en PAUSED y con la
  * categoría especial HOUSING (anuncios inmobiliarios, §10). Sin credenciales
@@ -133,13 +396,33 @@ async function publishCampaniaPaused(input: PublishCampaniaInput): Promise<Publi
   const objective = objetivoMeta(input.objetivo);
   const validateOnly = input.validateOnly === true;
 
+  if (input.leadAd && (
+    input.simulate ||
+    !input.credentials.accessToken ||
+    !input.credentials.adAccountId
+  )) {
+    throw new HttpError(
+      503,
+      'La creación real del anuncio requiere una cuenta publicitaria Meta conectada. No se generó una campaña simulada.',
+    );
+  }
+
   if (input.simulate || !input.credentials.accessToken || !input.credentials.adAccountId) {
     return {
       meta_campaign_id: validateOnly ? null : `META-SIM-${String(input.campaniaId).padStart(8, '0')}`,
       simulado: true,
       validado_solo: validateOnly,
+      ...(input.leadAd && !validateOnly
+        ? {
+            meta_adset_id: `META-SIM-ADSET-${input.campaniaId}`,
+            meta_adcreative_id: `META-SIM-CREATIVE-${input.campaniaId}`,
+            meta_ad_id: `META-SIM-AD-${input.campaniaId}`,
+            meta_lead_form_id: `META-SIM-FORM-${input.campaniaId}`,
+          }
+        : {}),
     };
   }
+  if (input.leadAd) return createPausedLeadAd(input);
 
   // El SDK no publica tipos: se carga bajo demanda y se usa de forma acotada.
   // eslint-disable-next-line @typescript-eslint/no-var-requires

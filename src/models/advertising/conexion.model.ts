@@ -13,6 +13,7 @@ export interface Conexion {
   empresa_id: number;
   cuenta_publicitaria_id: string;
   nombre_cuenta: string;
+  meta_currency: string | null;
   estado: ConexionEstado;
   /** Alcances otorgados por Meta (guardados al conectar). */
   permisos: Record<string, unknown> | null;
@@ -28,6 +29,7 @@ export interface ConexionView {
   organization_id: string | null;
   cuenta_publicitaria_id: string;
   nombre_cuenta: string;
+  account_currency: string | null;
   estado: ConexionEstado;
   permisos: Record<string, unknown> | null;
   autenticada: boolean;

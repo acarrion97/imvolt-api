@@ -14,9 +14,11 @@ import {
   decryptMetaToken,
   exchangeMetaCode,
   exchangeMetaSdkToken,
+  listMetaPages,
   metaDataDeletionStatusUrl,
   metaOAuthFrontendUrl,
   saveMetaConnections,
+  searchMetaAdLocations,
 } from '../services/meta-oauth.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
 import {
@@ -156,6 +158,39 @@ async function callbackMetaDataDeletion(req: Request, res: Response): Promise<vo
   }
 }
 
+async function listarPaginasMeta(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.organizationId) throw new HttpError(401, 'Sesión de empresa no iniciada.');
+    const connectionId = Number(req.query.connection_id);
+    if (!Number.isInteger(connectionId) || connectionId <= 0) {
+      throw new ValidationError('Selecciona una cuenta publicitaria conectada.');
+    }
+    const credentials = await credencialesMeta(req.organizationId, connectionId);
+    if (!credentials) throw new HttpError(503, 'La cuenta Meta seleccionada no está disponible.');
+    res.json(await listMetaPages(credentials.accessToken));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function buscarUbicacionesMeta(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.organizationId) throw new HttpError(401, 'Sesión de empresa no iniciada.');
+    const connectionId = Number(req.query.connection_id);
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!Number.isInteger(connectionId) || connectionId <= 0 || query.length < 2 || query.length > 100) {
+      throw new ValidationError('Selecciona una cuenta conectada e ingresa al menos dos caracteres de ubicación.');
+    }
+    const credentials = await credencialesMeta(req.organizationId, connectionId);
+    if (!credentials) throw new HttpError(503, 'La cuenta Meta seleccionada no está disponible.');
+    res.json(await searchMetaAdLocations(credentials.accessToken, query));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
 export const { router: conexionRouter } = createCrudRouter({
   table: 'conexiones',
   primaryKey: 'conexion_id',
@@ -185,6 +220,20 @@ export const { router: conexionRouter } = createCrudRouter({
     );
     router.get('/meta/oauth/callback', callbackOAuthMeta);
     router.post('/meta/data-deletion', callbackMetaDataDeletion);
+    router.get(
+      '/meta/pages',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      listarPaginasMeta,
+    );
+    router.get(
+      '/meta/locations',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      buscarUbicacionesMeta,
+    );
   },
 });
 
@@ -251,7 +300,7 @@ async function credencialesMeta(
 ): Promise<MetaCredentials | null> {
   let connectionQuery = supabase
     .from('conexiones')
-    .select('conexion_id, cuenta_publicitaria_id, estado, access_token_enc, token_expira_en')
+    .select('conexion_id, cuenta_publicitaria_id, meta_currency, estado, access_token_enc, token_expira_en')
     .eq('empresa_id', Number(empresaId))
     .eq('estado', 'conectada');
   if (conexionId != null) connectionQuery = connectionQuery.eq('conexion_id', conexionId);
@@ -274,6 +323,7 @@ async function credencialesMeta(
     return {
       adAccountId: connection.cuenta_publicitaria_id,
       accessToken: decryptMetaToken(connection.access_token_enc),
+      currency: connection.meta_currency ?? undefined,
     };
   }
   if (conexionId != null) {
@@ -337,11 +387,56 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       objetivo: String(campania.objetivo_publicidad?.nombre ?? ''),
       credentials: credentials ?? { adAccountId: '', accessToken: '' },
       simulate,
+      ...(campania.meta_page_id ||
+      campania.target_location_key ||
+      campania.privacy_policy_url ||
+      campania.creative_url
+        ? {
+            leadAd: {
+              pageId: String(campania.meta_page_id ?? ''),
+              locationKey: String(campania.target_location_key ?? ''),
+              locationCountryCode: String(campania.target_location_country_code ?? ''),
+              privacyPolicyUrl: String(campania.privacy_policy_url ?? ''),
+              mediaUrl: String(campania.creative_url ?? ''),
+              mediaType: campania.media_type as 'image' | 'video',
+              dailyBudget: Number(campania.presupuesto_diario),
+              currency: String(campania.moneda ?? ''),
+              startAt: String(campania.fecha_inicio ?? ''),
+              endAt: String(campania.fecha_fin ?? ''),
+              title: String(campania.titulo ?? ''),
+              copy: String(campania.copy_anuncio ?? ''),
+            },
+          }
+        : {}),
     };
+
+    if (input.leadAd && (
+      !input.leadAd.pageId ||
+      !input.leadAd.locationKey ||
+      !input.leadAd.privacyPolicyUrl ||
+      !input.leadAd.mediaUrl ||
+      !['image', 'video'].includes(input.leadAd.mediaType) ||
+      !input.leadAd.title ||
+      !input.leadAd.copy ||
+      !campania.fecha_inicio ||
+      !campania.fecha_fin
+    )) {
+      throw new ValidationError('El borrador no tiene todos los datos requeridos para crear el anuncio de formulario.');
+    }
+    if (input.leadAd && credentials && credentials.currency !== campania.moneda) {
+      throw new ValidationError(
+        'La moneda del borrador no coincide con la cuenta publicitaria. Actualiza el borrador o vuelve a conectar Meta.',
+      );
+    }
 
     if (validarSolo) {
       const r = await metaService.publishCampaniaPaused({ ...input, validateOnly: true });
-      res.json({ message: 'Validación correcta: no se creó nada en Meta', ...r });
+      res.json({
+        message: input.leadAd
+          ? 'Validación local correcta: no se creó nada en Meta'
+          : 'Validación correcta: no se creó nada en Meta',
+        ...r,
+      });
       return;
     }
 
@@ -363,6 +458,10 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       .from('campanias_publicitarias')
       .update({
         meta_campaign_id: r.meta_campaign_id,
+        meta_adset_id: r.meta_adset_id ?? null,
+        meta_adcreative_id: r.meta_adcreative_id ?? null,
+        meta_ad_id: r.meta_ad_id ?? null,
+        meta_lead_form_id: r.meta_lead_form_id ?? null,
         meta_estado: 'published_paused',
         estado_flujo: 'published_paused',
         publicada_en: new Date().toISOString(),
@@ -376,14 +475,24 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
     }
     reservada = false;
 
-    await logAudit('campanias_publicitarias', 'UPDATE', id, { accion: 'publicar_meta', meta_campaign_id: r.meta_campaign_id, simulado: r.simulado }, {
+    await logAudit('campanias_publicitarias', 'UPDATE', id, {
+      accion: input.leadAd ? 'crear_anuncio_meta_pausado' : 'publicar_meta',
+      meta_campaign_id: r.meta_campaign_id,
+      meta_adset_id: r.meta_adset_id,
+      meta_ad_id: r.meta_ad_id,
+      simulado: r.simulado,
+    }, {
       authUserId: req.userId,
       usuarioId: req.localUsuarioId,
       empresaId: req.organizationId,
     });
 
     res.status(201).json({
-      message: r.simulado ? 'Campaña publicada en modo SIMULADO (pausada)' : 'Campaña creada en Meta en estado PAUSADO',
+      message: r.simulado
+        ? 'Anuncio creado en modo SIMULADO (pausado)'
+        : input.leadAd
+          ? 'Campaña, conjunto y anuncio creados en Meta en estado PAUSADO'
+          : 'Campaña creada en Meta en estado PAUSADO',
       campania_publicitaria_id: id,
       meta_estado: 'published_paused',
       ...r,
