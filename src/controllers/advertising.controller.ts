@@ -9,10 +9,11 @@ import { logAudit } from '../services/audit.service';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import {
   consumeMetaOAuthState,
-  createMetaAuthorizationUrl,
+  createMetaOAuthState,
   deleteMetaUserData,
   decryptMetaToken,
   exchangeMetaCode,
+  exchangeMetaSdkToken,
   metaDataDeletionStatusUrl,
   metaOAuthFrontendUrl,
   saveMetaConnections,
@@ -58,12 +59,44 @@ async function iniciarOAuthMeta(req: Request, res: Response): Promise<void> {
     if (!req.organizationId) {
       throw new HttpError(401, 'Sesión de empresa no iniciada.');
     }
-    const authorizationUrl = await createMetaAuthorizationUrl(req.organizationId);
-    res.json({ authorization_url: authorizationUrl });
+    const oauthState = await createMetaOAuthState(req.organizationId);
+    res.json(oauthState);
   } catch (error) {
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
   }
+}
+
+async function completarOAuthMetaSdk(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.organizationId) throw new HttpError(401, 'Sesión de empresa no iniciada.');
+    const state = typeof req.body?.state === 'string' ? req.body.state : '';
+    const accessToken = typeof req.body?.access_token === 'string' ? req.body.access_token : '';
+    if (!/^[\da-f]{64}$/.test(state) || accessToken.length < 20 || accessToken.length > 4096) {
+      throw new ValidationError('La respuesta de Facebook Login no es válida.');
+    }
+
+    const result = await exchangeMetaSdkToken(accessToken, state, req.organizationId);
+    await guardarConexionMeta(result);
+    res.json({ connected: true, accounts_connected: result.accounts.length });
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function guardarConexionMeta(result: Awaited<ReturnType<typeof exchangeMetaCode>>): Promise<void> {
+  await saveMetaConnections(result);
+  await logAudit(
+    'conexiones',
+    'CREATE',
+    null,
+    {
+      accion: 'meta_oauth_connected',
+      cuentas: result.accounts.map(({ id, name }) => ({ id, name })),
+    },
+    { empresaId: result.empresaId },
+  );
 }
 
 function redirigirMeta(res: Response, status: string): void {
@@ -97,17 +130,7 @@ async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
     }
 
     const result = await exchangeMetaCode(code, state);
-    await saveMetaConnections(result);
-    await logAudit(
-      'conexiones',
-      'CREATE',
-      null,
-      {
-        accion: 'meta_oauth_connected',
-        cuentas: result.accounts.map(({ id, name }) => ({ id, name })),
-      },
-      { empresaId: result.empresaId },
-    );
+    await guardarConexionMeta(result);
     redirigirMeta(res, 'connected');
   } catch (error) {
     const { status } = errorResponse(error);
@@ -152,6 +175,13 @@ export const { router: conexionRouter } = createCrudRouter({
       writeByOwnerOrAdmin,
       manageIntegrations,
       iniciarOAuthMeta,
+    );
+    router.post(
+      '/meta/oauth/complete',
+      ...requireOrg,
+      writeByOwnerOrAdmin,
+      manageIntegrations,
+      completarOAuthMetaSdk,
     );
     router.get('/meta/oauth/callback', callbackOAuthMeta);
     router.post('/meta/data-deletion', callbackMetaDataDeletion);

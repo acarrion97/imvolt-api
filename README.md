@@ -385,7 +385,7 @@ simulados. Las credenciales de proveedores no se guardan en `.env`.
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
-### Conectar clientes con Meta OAuth
+### Conectar clientes con Facebook Login SDK
 
 En Render configura estas variables (no las pongas en Vercel ni en variables
 `VITE_*`):
@@ -405,13 +405,44 @@ Genera `META_TOKEN_ENCRYPTION_KEY` con
 Guárdala de forma permanente y segura: cambiarla sin volver a conectar las
 cuentas invalida los tokens ya cifrados.
 
-La URI exacta que se registra en Meta Developer → Facebook Login → Configuración
-→ **URI de redireccionamiento de OAuth válidos** es:
+`META_APP_ID` es el identificador público. Configúralo también en
+`frontend/.env` como `VITE_META_APP_ID` (local) o en Vercel como variable de
+build. En el panel Business Login de Meta crea una configuración para los
+permisos publicitarios que necesita la integración (`ads_management` y
+`ads_read`) y define su ID en `VITE_META_LOGIN_CONFIG_ID`, tanto localmente
+como en las variables de build de Vercel. `VITE_META_GRAPH_API_VERSION` debe
+coincidir con `META_GRAPH_API_VERSION`. Nunca pongas `META_APP_SECRET` ni
+`META_TOKEN_ENCRYPTION_KEY` en el frontend.
+
+En Meta Developer → Facebook Login → Configuración, habilita el SDK de
+JavaScript, añade `localhost` y `imvolt.vercel.app` a **Dominios de la app** y
+registra estas URI en **URI de redireccionamiento de OAuth válidos**:
+
+```text
+http://localhost:5173/
+https://imvolt.vercel.app/
+```
+
+Para probar en local, configura en `api/.env`:
+
+```text
+PUBLIC_API_URL=http://localhost:3000
+PUBLIC_FRONTEND_URL=http://localhost:5173
+ALLOWED_ORIGIN=http://localhost:5173
+```
+
+Y en `frontend/.env`, usa `VITE_API_URL=http://localhost:3000/api`,
+`VITE_DATA_PROVIDER=rest` y el mismo `VITE_META_APP_ID` público. Si Meta no
+permite completar el popup desde HTTP local, prueba desde un origen HTTPS.
+
+El botón de Facebook Login for Business usa ese `config_id`, y tras autorizar
+consulta `FB.getLoginStatus` para completar la conexión con
+`POST /api/v1/conexiones/meta/oauth/complete`; no redirige al callback del API.
+Si aún necesitas el flujo OAuth de redirección legado, añade también:
 
 `https://imvolt-api.onrender.com/api/v1/conexiones/meta/oauth/callback`
 
-Usa también esa misma URI como **URL de devolución de llamada para autorización
-cancelada**. En **Solicitudes de eliminación de datos**, configura:
+En **Solicitudes de eliminación de datos**, configura:
 
 `https://imvolt-api.onrender.com/api/v1/conexiones/meta/data-deletion`
 

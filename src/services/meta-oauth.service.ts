@@ -34,9 +34,18 @@ interface MetaUserResponse {
   id: string;
 }
 
+interface MetaDebugTokenResponse {
+  data: {
+    app_id: string;
+    is_valid: boolean;
+    user_id?: string;
+    scopes?: string[];
+  };
+}
+
 function assertOAuthConfig(): void {
-  const { appId, appSecret, tokenEncryptionKey, callbackUrl, frontendUrl } = config.metaOAuth;
-  if (!appId || !appSecret || !tokenEncryptionKey || !callbackUrl || !frontendUrl) {
+  const { appId, appSecret, tokenEncryptionKey, frontendUrl } = config.metaOAuth;
+  if (!appId || !appSecret || !tokenEncryptionKey || !frontendUrl) {
     throw new HttpError(503, 'La conexión OAuth de Meta no está configurada en el servidor.');
   }
 }
@@ -46,20 +55,13 @@ function encryptionKey(): Buffer {
   return Buffer.from(config.metaOAuth.tokenEncryptionKey, 'hex');
 }
 
-export async function createMetaAuthorizationUrl(empresaId: string): Promise<string> {
+export async function createMetaOAuthState(
+  empresaId: string,
+): Promise<{ state: string; expires_at: string }> {
   assertOAuthConfig();
   const state = randomBytes(32).toString('hex');
   const stateHash = createHash('sha256').update(state).digest('hex');
   const expiresAt = new Date(Date.now() + STATE_TTL_MS).toISOString();
-
-  const authorizationUrl = new URL(
-    `https://www.facebook.com/${config.metaOAuth.graphApiVersion}/dialog/oauth`,
-  );
-  authorizationUrl.searchParams.set('client_id', config.metaOAuth.appId);
-  authorizationUrl.searchParams.set('redirect_uri', config.metaOAuth.callbackUrl);
-  authorizationUrl.searchParams.set('response_type', 'code');
-  authorizationUrl.searchParams.set('scope', 'ads_management,ads_read');
-  authorizationUrl.searchParams.set('state', state);
 
   const { error } = await supabase
     .from('meta_oauth_states')
@@ -69,7 +71,7 @@ export async function createMetaAuthorizationUrl(empresaId: string): Promise<str
       expira_en: expiresAt,
     });
   if (error) throw new HttpError(503, 'No se pudo iniciar de forma segura la conexión con Meta.');
-  return authorizationUrl.toString();
+  return { state, expires_at: expiresAt };
 }
 
 /**
@@ -129,6 +131,9 @@ export async function exchangeMetaCode(code: string, state: string): Promise<{
   expiresAt: string | null;
 }> {
   assertOAuthConfig();
+  if (!config.metaOAuth.callbackUrl) {
+    throw new HttpError(503, 'El callback OAuth del servidor no está configurado.');
+  }
 
   const oauthState = await consumeMetaOAuthState(state);
 
@@ -150,6 +155,65 @@ export async function exchangeMetaCode(code: string, state: string): Promise<{
     throw new HttpError(502, 'Meta no pudo completar la autorización. Inicia el proceso de nuevo.');
   }
 
+  return persistMetaToken(oauthState.empresaId, shortLivedToken);
+}
+
+export async function exchangeMetaSdkToken(
+  accessToken: string,
+  state: string,
+  expectedEmpresaId: string,
+): Promise<{
+  empresaId: number;
+  metaUserId: string;
+  accounts: MetaAdAccount[];
+  encryptedToken: string;
+  expiresAt: string | null;
+}> {
+  assertOAuthConfig();
+  const oauthState = await consumeMetaOAuthState(state);
+  if (String(oauthState.empresaId) !== expectedEmpresaId) {
+    throw new HttpError(403, 'La autorización de Meta pertenece a otra empresa.');
+  }
+
+  const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
+  let debug: MetaDebugTokenResponse['data'];
+  try {
+    const { data } = await axios.get<MetaDebugTokenResponse>(`${graphUrl}/debug_token`, {
+      params: {
+        input_token: accessToken,
+        access_token: `${config.metaOAuth.appId}|${config.metaOAuth.appSecret}`,
+      },
+      timeout: 15000,
+    });
+    debug = data.data;
+  } catch {
+    throw new HttpError(502, 'Meta no pudo validar la autorización. Inicia el proceso de nuevo.');
+  }
+
+  if (!debug?.is_valid || debug.app_id !== config.metaOAuth.appId || !debug.user_id) {
+    throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
+  }
+  const scopes = new Set(debug.scopes ?? []);
+  const missingScopes = ['ads_management', 'ads_read'].filter((scope) => !scopes.has(scope));
+  if (missingScopes.length) {
+    throw new HttpError(403, 'La autorización no incluye todos los permisos de anuncios requeridos.');
+  }
+
+  return persistMetaToken(oauthState.empresaId, accessToken, debug.user_id);
+}
+
+async function persistMetaToken(
+  empresaId: number,
+  shortLivedToken: string,
+  expectedMetaUserId?: string,
+): Promise<{
+  empresaId: number;
+  metaUserId: string;
+  accounts: MetaAdAccount[];
+  encryptedToken: string;
+  expiresAt: string | null;
+}> {
+  const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
   let accessToken: string;
   let expiresIn: number | undefined;
   try {
@@ -214,13 +278,16 @@ export async function exchangeMetaCode(code: string, state: string): Promise<{
   } catch {
     throw new HttpError(502, 'No se pudo identificar la cuenta autorizada en Meta.');
   }
+  if (expectedMetaUserId && metaUserId !== expectedMetaUserId) {
+    throw new HttpError(401, 'La autorización de Meta no coincide con la cuenta validada.');
+  }
 
   const expiresAt =
     Number.isFinite(expiresIn) && Number(expiresIn) > 0
       ? new Date(Date.now() + Number(expiresIn) * 1000).toISOString()
       : null;
   return {
-    empresaId: oauthState.empresaId,
+    empresaId,
     metaUserId,
     accounts: activeAccounts,
     encryptedToken: encryptMetaToken(accessToken),
