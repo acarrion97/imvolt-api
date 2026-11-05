@@ -106,6 +106,31 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('PLATFORM_ADMIN_EMAILS debe ser una lista de correos separados por comas.');
   }
 
+  const metaAppId = get('META_APP_ID');
+  const metaAppSecret = get('META_APP_SECRET');
+  const metaTokenEncryptionKey = get('META_TOKEN_ENCRYPTION_KEY');
+  const metaOAuthConfigured = Boolean(metaAppId || metaAppSecret || metaTokenEncryptionKey);
+  if (metaOAuthConfigured) {
+    if (!metaAppId) errors.push('META_APP_ID es obligatoria para habilitar OAuth de Meta.');
+    if (!metaAppSecret) errors.push('META_APP_SECRET es obligatoria para habilitar OAuth de Meta.');
+    if (!/^[\da-fA-F]{64}$/.test(metaTokenEncryptionKey)) {
+      errors.push('META_TOKEN_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
+    }
+    if (!publicUrl) errors.push('PUBLIC_API_URL es obligatoria para habilitar OAuth de Meta.');
+    const frontendUrl = get('PUBLIC_FRONTEND_URL');
+    const parsedFrontend = frontendUrl ? parseUrl(frontendUrl) : null;
+    if (!frontendUrl || !parsedFrontend || parsedFrontend.origin !== frontendUrl) {
+      errors.push('PUBLIC_FRONTEND_URL debe ser el origen público del frontend, sin ruta.');
+    } else if (prod && parsedFrontend.protocol !== 'https:') {
+      errors.push('PUBLIC_FRONTEND_URL debe usar https:// en producción.');
+    }
+  }
+
+  const metaGraphVersion = get('META_GRAPH_API_VERSION');
+  if (metaGraphVersion && !/^v\d+\.\d+$/.test(metaGraphVersion)) {
+    errors.push('META_GRAPH_API_VERSION debe tener el formato vNN.N (por ejemplo, v24.0).');
+  }
+
   return { errors, warnings };
 }
 

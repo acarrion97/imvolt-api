@@ -19,6 +19,11 @@ export const {
   AUTH_RATE_LIMIT_LOGIN_MAX = '',
   AUTH_RATE_LIMIT_REGISTER_MAX = '',
   AUTH_RATE_LIMIT_WINDOW_MINUTES = '',
+  META_APP_ID = '',
+  META_APP_SECRET = '',
+  META_TOKEN_ENCRYPTION_KEY = '',
+  PUBLIC_FRONTEND_URL = '',
+  META_GRAPH_API_VERSION = '',
 } = process.env;
 
 const asBool = (value: string, fallback: boolean): boolean =>
@@ -56,6 +61,16 @@ export const config = {
     windowMs: asPositiveInt(AUTH_RATE_LIMIT_WINDOW_MINUTES, 15) * 60 * 1000,
     loginMax: asPositiveInt(AUTH_RATE_LIMIT_LOGIN_MAX, 10),
     registerMax: asPositiveInt(AUTH_RATE_LIMIT_REGISTER_MAX, 5),
+  },
+  metaOAuth: {
+    appId: META_APP_ID.trim(),
+    appSecret: META_APP_SECRET.trim(),
+    tokenEncryptionKey: META_TOKEN_ENCRYPTION_KEY.trim(),
+    frontendUrl: PUBLIC_FRONTEND_URL.trim().replace(/\/$/, ''),
+    graphApiVersion: META_GRAPH_API_VERSION.trim() || 'v24.0',
+    callbackUrl: PUBLIC_API_URL
+      ? `${PUBLIC_API_URL.replace(/\/$/, '')}/api/v1/conexiones/meta/oauth/callback`
+      : '',
   },
   db: {
     url: SUPABASE_URL,

@@ -77,6 +77,7 @@ app.use('/api', noStore);
 // ── Middleware global ────────────────────────────────────────────────────────
 // 1 MB para JSON: las subidas de archivos van por multipart (multer, con sus límites).
 app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 
 // ── Salud del servicio ──────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {

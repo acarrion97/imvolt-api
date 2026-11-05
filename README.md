@@ -357,10 +357,17 @@ duplican esas entidades. El CRUD heredado `/campanias-publicitarias` y
 GET/POST/PATCH/DELETE /api/v1/campaigns
 GET/POST/PATCH/DELETE /api/v1/leads
 GET/DELETE            /api/v1/conexiones
+POST                  /api/v1/conexiones/meta/oauth/start
+GET                   /api/v1/conexiones/meta/oauth/callback
 ```
 
-Las credenciales de Meta se leen de la integración activa de la empresa en
-`configuraciones_integraciones`, vinculada por `empresas_integraciones`.
+Cada empresa inicia Meta OAuth con un usuario autorizado de la plataforma. El
+estado OAuth, las cuentas y sus tokens quedan vinculados a `empresa_id`, nunca
+al ID del usuario de IMVOLT. El callback intercambia el código por un token de
+larga duración, consulta las cuentas publicitarias activas y guarda el token
+cifrado en `conexiones`. `meta_user_id` es únicamente el ID externo asignado por
+Meta, para atender sus solicitudes de eliminación de datos. El navegador nunca
+recibe el App Secret ni el token de Meta.
 
 ### Créditos (§16)
 
@@ -378,11 +385,54 @@ simulados. Las credenciales de proveedores no se guardan en `.env`.
 
 El navegador **nunca** recibe claves de Higgsfield ni tokens de Meta (§12).
 
-Para conectar un proveedor, crea la configuración de credenciales en
+### Conectar clientes con Meta OAuth
+
+En Render configura estas variables (no las pongas en Vercel ni en variables
+`VITE_*`):
+
+| Variable | Valor / uso |
+|---|---|
+| `META_APP_ID` | ID público de la app creada en Meta for Developers |
+| `META_APP_SECRET` | App Secret de Meta; solo servidor |
+| `META_TOKEN_ENCRYPTION_KEY` | Clave aleatoria de 32 bytes en hexadecimal (64 caracteres) |
+| `PUBLIC_API_URL` | `https://imvolt-api.onrender.com` |
+| `PUBLIC_FRONTEND_URL` | `https://imvolt.vercel.app` |
+| `ALLOWED_ORIGIN` | `https://imvolt.vercel.app` |
+| `META_GRAPH_API_VERSION` | Versión de Graph API habilitada para la app, por ejemplo `v24.0` |
+
+Genera `META_TOKEN_ENCRYPTION_KEY` con
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+Guárdala de forma permanente y segura: cambiarla sin volver a conectar las
+cuentas invalida los tokens ya cifrados.
+
+La URI exacta que se registra en Meta Developer → Facebook Login → Configuración
+→ **URI de redireccionamiento de OAuth válidos** es:
+
+`https://imvolt-api.onrender.com/api/v1/conexiones/meta/oauth/callback`
+
+Usa también esa misma URI como **URL de devolución de llamada para autorización
+cancelada**. En **Solicitudes de eliminación de datos**, configura:
+
+`https://imvolt-api.onrender.com/api/v1/conexiones/meta/data-deletion`
+
+La respuesta de eliminación devuelve una URL de estado en
+`https://imvolt.vercel.app/eliminacion-datos.html`. Activa el inicio de sesión
+OAuth web y el modo estricto de URI de redireccionamiento. El usuario inicia
+la conexión desde Configuración de IMVOLT; no debe escribir su contraseña de
+Facebook dentro de IMVOLT.
+
+La app de Meta debe estar en modo **Live** y contar con acceso avanzado/revisión
+para los permisos de anuncios solicitados (`ads_management` y `ads_read`) antes
+de conectar usuarios que no sean roles de la app. Cada persona solo podrá
+seleccionar cuentas publicitarias a las que su propio Facebook tenga acceso.
+La conexión guarda las cuentas activas encontradas en esa autorización.
+
+### Configurar Higgsfield
+
+Para Higgsfield, crea la configuración de credenciales en
 `POST /api/v1/configuraciones-integraciones` y vincúlala a la empresa y al
 proveedor en `POST /api/v1/empresas-integraciones`. Ambos endpoints requieren
-sesión y permiso `gestionar_integraciones`. El catálogo de `integraciones`
-incluye `Higgsfield` y `Meta Ads`.
+sesión y permiso `gestionar_integraciones`.
 
 Consulta los IDs disponibles con:
 
@@ -392,8 +442,8 @@ from public.integraciones
 where nombre in ('Higgsfield', 'Meta Ads');
 ```
 
-La creación requiere primero una configuración (el `empresa_id` se toma de la
-sesión):
+La configuración de Higgsfield requiere primero una configuración (el
+`empresa_id` se toma de la sesión):
 
 ```json
 {
@@ -416,11 +466,7 @@ Campos usados por proveedor:
 | Proveedor | `url_base` | `api_key` | `api_id` | `app_secret` | `access_token` |
 |-----------|------------|-----------|----------|--------------|----------------|
 | Higgsfield | `https://api.higgsfield.ai` | API Key ID | — | API Key Secret | — |
-| Meta Ads | `https://graph.facebook.com` | App ID | ID de cuenta `act_<id>` | Secreto de aplicación (si aplica) | Token con permisos de anuncios |
-
-Para Meta Ads, la configuración debe incluir `api_id` (cuenta publicitaria,
-con o sin prefijo `act_`) y `access_token`. En ambos proveedores, `entorno`
-debe ser `produccion` para llamadas reales.
+| Meta Ads | OAuth del servidor | — | — | — | Cifrado en `conexiones` |
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y, en producción,
 `SUPABASE_ANON_KEY` permanecen en variables de entorno: la API necesita esas
@@ -436,8 +482,8 @@ oficial, **siempre `PAUSED`** y con `special_ad_categories: ['HOUSING']`. Body o
 `{ "validar_solo": true }` (Meta valida sin crear nada).
 
 - Rol propietario/administrador/marketing con permiso `gestionar_campanas`.
-- Usa las credenciales de la integración activa `Meta Ads` de la empresa; sin
-  conexión activa, el flujo permanece simulado.
+- Usa el token cifrado de la cuenta Meta seleccionada y conectada a la empresa;
+  sin conexión activa, el flujo permanece simulado.
 - La campaña siempre se crea en estado PAUSED y nunca inicia gasto automáticamente.
 - ✅ Migración **aplicada el 2026-10-27**: `database/migrations/2026-10-27_meta_campaign_publish.sql`
   (columnas `meta_campaign_id`, `meta_estado`, `publicada_en`). Sin ella este
@@ -459,6 +505,7 @@ npm install
 #      migrations/2026-10-27_03_credit_ledger.sql
 #      migrations/2026-10-27_04_campaign_tenant_backfill.sql
 #      migrations/2026-10-27_05_meta_oauth_tokens.sql
+#      migrations/2026-11-05_meta_oauth_state.sql
 #      migrations/2026-10-27_meta_campaign_publish.sql (publicación Meta)
 #    Las campañas y leads reutilizan las tablas existentes; no se crean tablas
 #    duplicadas para esos recursos.

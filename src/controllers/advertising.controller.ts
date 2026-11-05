@@ -7,6 +7,16 @@ import { createCrudRouter } from '../core/crud.factory';
 import { errorResponse, HttpError, NotFoundError, ValidationError } from '../core/errors';
 import { logAudit } from '../services/audit.service';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
+import {
+  consumeMetaOAuthState,
+  createMetaAuthorizationUrl,
+  deleteMetaUserData,
+  decryptMetaToken,
+  exchangeMetaCode,
+  metaDataDeletionStatusUrl,
+  metaOAuthFrontendUrl,
+  saveMetaConnections,
+} from '../services/meta-oauth.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
 import {
   campaignRequest,
@@ -21,7 +31,7 @@ import {
   objetivoPublicidadResource,
 } from '../resources/advertising.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
-import { requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
+import { manageIntegrations, requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
 import { resolveField, translateBody, translateQuery } from '../middlewares/contract';
 
@@ -43,6 +53,86 @@ export const { router: objetivoPublicidadRouter } = createCrudRouter({
 });
 
 // ── Conexiones de cuentas publicitarias ────────────────────────────────────
+async function iniciarOAuthMeta(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.organizationId) {
+      throw new HttpError(401, 'Sesión de empresa no iniciada.');
+    }
+    const authorizationUrl = await createMetaAuthorizationUrl(req.organizationId);
+    res.json({ authorization_url: authorizationUrl });
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+function redirigirMeta(res: Response, status: string): void {
+  try {
+    res.redirect(303, metaOAuthFrontendUrl(status));
+  } catch {
+    res.status(503).json({ message: 'La conexión OAuth de Meta no está configurada.' });
+  }
+}
+
+async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const providerError = typeof req.query.error === 'string' ? req.query.error : '';
+
+  if (!state || state.length !== 64) {
+    redirigirMeta(res, 'error');
+    return;
+  }
+
+  try {
+    if (providerError) {
+      await consumeMetaOAuthState(state);
+      redirigirMeta(res, providerError === 'access_denied' ? 'cancelled' : 'error');
+      return;
+    }
+    if (!code || code.length > 4096) {
+      await consumeMetaOAuthState(state);
+      redirigirMeta(res, 'error');
+      return;
+    }
+
+    const result = await exchangeMetaCode(code, state);
+    await saveMetaConnections(result);
+    await logAudit(
+      'conexiones',
+      'CREATE',
+      null,
+      {
+        accion: 'meta_oauth_connected',
+        cuentas: result.accounts.map(({ id, name }) => ({ id, name })),
+      },
+      { empresaId: result.empresaId },
+    );
+    redirigirMeta(res, 'connected');
+  } catch (error) {
+    const { status } = errorResponse(error);
+    redirigirMeta(res, status === 422 ? 'no_accounts' : 'error');
+  }
+}
+
+async function callbackMetaDataDeletion(req: Request, res: Response): Promise<void> {
+  const signedRequest =
+    typeof req.body?.signed_request === 'string' ? req.body.signed_request : '';
+  try {
+    if (!signedRequest || signedRequest.length > 10000) {
+      throw new ValidationError('La solicitud de eliminación de Meta no es válida.');
+    }
+    const confirmationCode = await deleteMetaUserData(signedRequest);
+    res.json({
+      url: metaDataDeletionStatusUrl(confirmationCode),
+      confirmation_code: confirmationCode,
+    });
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
 export const { router: conexionRouter } = createCrudRouter({
   table: 'conexiones',
   primaryKey: 'conexion_id',
@@ -55,6 +145,17 @@ export const { router: conexionRouter } = createCrudRouter({
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
+  extraRoutes: (router) => {
+    router.post(
+      '/meta/oauth/start',
+      ...requireOrg,
+      writeByOwnerOrAdmin,
+      manageIntegrations,
+      iniciarOAuthMeta,
+    );
+    router.get('/meta/oauth/callback', callbackOAuthMeta);
+    router.post('/meta/data-deletion', callbackMetaDataDeletion);
+  },
 });
 
 const slugObjetivo = (value: string): string => value
@@ -113,8 +214,42 @@ export const { router: campaignRouter } = createCrudRouter({
 
 // ── Publicación en Meta ─────────────────────────────────────────────────────
 
-/** Credenciales de Meta de la integración activa de la empresa. */
-async function credencialesMeta(empresaId: string): Promise<MetaCredentials | null> {
+/** Prefer the selected OAuth connection; retain the legacy config as a migration fallback. */
+async function credencialesMeta(
+  empresaId: string,
+  conexionId?: number | null,
+): Promise<MetaCredentials | null> {
+  let connectionQuery = supabase
+    .from('conexiones')
+    .select('conexion_id, cuenta_publicitaria_id, estado, access_token_enc, token_expira_en')
+    .eq('empresa_id', Number(empresaId))
+    .eq('estado', 'conectada');
+  if (conexionId != null) connectionQuery = connectionQuery.eq('conexion_id', conexionId);
+  const { data: connection, error: connectionError } = await connectionQuery
+    .order('creado_en', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (connectionError) throw new Error(`No se pudo leer la conexión Meta: ${connectionError.message}`);
+  if (connection) {
+    if (!connection.access_token_enc) {
+      throw new HttpError(503, 'La conexión seleccionada de Meta no tiene un token guardado.');
+    }
+    if (
+      connection.token_expira_en &&
+      new Date(connection.token_expira_en).getTime() <= Date.now()
+    ) {
+      throw new HttpError(503, 'La conexión seleccionada de Meta expiró. Vuelve a conectarla.');
+    }
+    return {
+      adAccountId: connection.cuenta_publicitaria_id,
+      accessToken: decryptMetaToken(connection.access_token_enc),
+    };
+  }
+  if (conexionId != null) {
+    throw new HttpError(503, 'La cuenta Meta seleccionada no está conectada a esta empresa.');
+  }
+
   const integration = await getCompanyIntegrationConfig(empresaId, 'Meta Ads');
   if (!integration) return null;
   const entorno = integration.entorno.trim().toLowerCase();
@@ -161,7 +296,10 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       throw new ValidationError('El presupuesto diario debe ser mayor a cero');
     }
 
-    const credentials = await credencialesMeta(req.organizationId as string);
+    const credentials = await credencialesMeta(
+      req.organizationId as string,
+      campania.conexion_id == null ? null : Number(campania.conexion_id),
+    );
     const simulate = credentials === null;
     const input = {
       campaniaId: id,
