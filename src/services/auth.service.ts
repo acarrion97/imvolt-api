@@ -14,7 +14,7 @@
 import supabase, { createAuthClient } from '../config/supabaseClient';
 import { HttpError } from '../core/errors';
 import { Usuario } from '../models/identity/usuario.model';
-import { ORG_PERMISSIONS } from '../middlewares/requireRole';
+import { isPlatformAdminEmail, ORG_PERMISSIONS } from '../middlewares/requireRole';
 import { logAudit } from './audit.service';
 
 export interface RegisterInput {
@@ -174,6 +174,8 @@ export async function me(email: string | undefined): Promise<{
   roles: Array<{ usuario_rol_id: number; rol_id: number; nombre: string }>;
   /** Unión de permisos activos de todos sus roles (RBAC fino, §13). */
   permisos: string[];
+  /** Capacidad de plataforma; no depende del rol de una empresa. */
+  es_super_admin: boolean;
 }> {
   if (!email) {
     throw new HttpError(401, 'El token no incluye un correo de acceso');
@@ -229,6 +231,7 @@ export async function me(email: string | undefined): Promise<{
     usuario: { ...resto, empresa: empresas ?? null },
     roles,
     permisos,
+    es_super_admin: isPlatformAdminEmail(email),
   };
 }
 

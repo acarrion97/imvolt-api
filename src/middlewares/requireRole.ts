@@ -95,6 +95,9 @@ export const manageIntegrations = requirePermission('gestionar_integraciones');
 /** Gestión del equipo: requiere el permiso `gestionar_usuarios`. */
 export const manageUsers = requirePermission('gestionar_usuarios');
 
+export const isPlatformAdminEmail = (email: string | undefined): boolean =>
+  Boolean(email && config.platformAdmins.includes(email.trim().toLowerCase()));
+
 /**
  * Escritura en catálogos GLOBALES (roles, permisos, roles_permisos, hitos,
  * tipos, formatos, plantillas…): son compartidos por TODAS las empresas, así
@@ -103,7 +106,7 @@ export const manageUsers = requirePermission('gestionar_usuarios');
  */
 export const writeByPlatformAdmin = (req: Request, res: Response, next: NextFunction): void => {
   const email = ((req.user as { email?: string } | undefined)?.email ?? '').toLowerCase();
-  if (!email || !config.platformAdmins.includes(email)) {
+  if (!isPlatformAdminEmail(email)) {
     res.status(403).json({ message: 'Este catálogo es global y solo lo administra la plataforma.' });
     return;
   }

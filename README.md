@@ -148,6 +148,16 @@ Ejecuta `database/migrations/2026-10-26_tenant_hardening.sql` **antes** de despl
 - `contactos` y `configuraciones-integraciones` incluyen `empresa_id` (campo nuevo, aditivo). Integraciones exigen `gestionar_integraciones` también para leer.
 - `limite` se acota a 500; el JSON del body a 1 MB; errores 5xx con mensaje genérico; `429` en login/registro.
 
+Para asignar al superadministrador que administra el catálogo global de
+plantillas, define `PLATFORM_ADMIN_EMAILS=correo@tu-dominio.com` en `api/.env`
+local o en las variables de entorno del servicio API (Render). Admite varios
+correos separados por coma y no distingue mayúsculas. El correo debe coincidir
+con la cuenta de inicio de sesión de IMVOLT. Reinicia o redespliega la API para
+aplicar el cambio. Las plantillas ya son globales: `plantillas` no contiene
+`empresa_id`; cualquier empresa puede consultarlas, pero solo esos correos
+pueden crearlas, editarlas o eliminarlas. El frontend oculta las acciones a
+otros usuarios y la API mantiene la autorización como control definitivo.
+
 ## Módulos y rutas
 
 | Módulo | Rutas | Contenido |
