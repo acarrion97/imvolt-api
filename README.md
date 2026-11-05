@@ -405,14 +405,14 @@ Genera `META_TOKEN_ENCRYPTION_KEY` con
 Guárdala de forma permanente y segura: cambiarla sin volver a conectar las
 cuentas invalida los tokens ya cifrados.
 
-`META_APP_ID` es el identificador público. Configúralo también en
-`frontend/.env` como `VITE_META_APP_ID` (local) o en Vercel como variable de
-build. En el panel Business Login de Meta crea una configuración para los
-permisos publicitarios que necesita la integración (`ads_management` y
-`ads_read`) y define su ID en `VITE_META_LOGIN_CONFIG_ID`, tanto localmente
-como en las variables de build de Vercel. `VITE_META_GRAPH_API_VERSION` debe
-coincidir con `META_GRAPH_API_VERSION`. Nunca pongas `META_APP_SECRET` ni
-`META_TOKEN_ENCRYPTION_KEY` en el frontend.
+`META_APP_ID` es el identificador público. Configúralo en el `.env` del
+frontend y como variable de build en Vercel. En el panel Business Login de Meta
+crea una configuración para los permisos publicitarios que necesita la
+integración (`ads_management` y `ads_read`) y define su ID en
+`META_LOGIN_CONFIG_ID`, tanto localmente como en las variables de build de
+Vercel. Configura `META_GRAPH_API_VERSION` en el frontend y el backend con la
+misma versión. Nunca pongas `META_APP_SECRET` ni `META_TOKEN_ENCRYPTION_KEY`
+en el frontend.
 
 En Meta Developer → Facebook Login → Configuración, habilita el SDK de
 JavaScript, añade `localhost` y `imvolt.vercel.app` a **Dominios de la app** y
@@ -432,7 +432,7 @@ ALLOWED_ORIGIN=http://localhost:5173
 ```
 
 Y en `frontend/.env`, usa `VITE_API_URL=http://localhost:3000/api`,
-`VITE_DATA_PROVIDER=rest` y el mismo `VITE_META_APP_ID` público. Si Meta no
+`VITE_DATA_PROVIDER=rest`, `META_APP_ID` y `META_LOGIN_CONFIG_ID`. Si Meta no
 permite completar el popup desde HTTP local, prueba desde un origen HTTPS.
 
 El botón de Facebook Login for Business usa ese `config_id`, y tras autorizar
