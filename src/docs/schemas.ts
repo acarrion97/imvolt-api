@@ -408,6 +408,32 @@ const definitions: EntityDef[] = [
     example: { contenido_ia_id: 9, propiedad_id: 3, plantilla_id: 2, formato_id: 1, duracion: '8 s', enfoque_comercial_id: 2, url_imagen_referencia: 'https://imvolt.ec/media/aurora-fachada-original.jpg', estado: 'activo', creado_en: '2026-03-06T09:15:00.000Z', actualizado_en: '2026-03-06T09:15:00.000Z' },
     relations: { propiedad: 'Propiedad', plantilla: 'Plantilla', formato: 'Formato', enfoque_comercial: 'EnfoqueComercial' },
   },
+  {
+    name: 'GenerationOutput',
+    pk: 'output_id',
+    pkExample: 1,
+    soloLectura: true,
+    properties: {
+      generation_id: { type: 'string', example: '19', description: 'Job de generación propietario del resultado' },
+      output_index: { type: 'integer', minimum: 0, example: 0, description: 'Posición estable del resultado dentro del job' },
+      media_type: { type: 'string', enum: ['image', 'video'], example: 'image' },
+      url: { type: 'string', format: 'uri', example: 'https://provider.example/output/image-1.png', description: 'URL entregada por el proveedor de generación' },
+      mime_type: { type: 'string', nullable: true, example: null },
+      metadata: { type: 'object', additionalProperties: true, example: {} },
+      created_at: ts('Fecha de persistencia del resultado'),
+    },
+    required: ['generation_id', 'output_index', 'media_type', 'url', 'metadata', 'created_at'],
+    example: {
+      output_id: '54',
+      generation_id: '19',
+      output_index: 0,
+      media_type: 'image',
+      url: 'https://provider.example/output/image-1.png',
+      mime_type: null,
+      metadata: {},
+      created_at: '2026-11-06T15:15:00.000Z',
+    },
+  },
 
   // ── Publicidad ───────────────────────────────────────────────────────────
   {
@@ -713,10 +739,17 @@ Object.assign(openapiSchemas, {
     moneda: { type: 'string' },
     fecha_inicio: { type: 'string', nullable: true, format: 'date-time' },
     fecha_fin: { type: 'string', nullable: true, format: 'date-time' },
+    duration_days: { type: 'number', nullable: true, description: 'Duración guardada en días' },
     titulo: { type: 'string', nullable: true },
     copy: { type: 'string', nullable: true },
     cta: { type: 'string', nullable: true },
     creative_url: { type: 'string', nullable: true },
+    meta_page_id: { type: 'string', nullable: true },
+    meta_instagram_id: { type: 'string', nullable: true },
+    target_location_key: { type: 'string', nullable: true },
+    target_location_country_code: { type: 'string', nullable: true, example: 'EC' },
+    privacy_policy_url: { type: 'string', nullable: true },
+    media_type: { type: 'string', nullable: true, enum: ['image', 'video'] },
     meta_campaign_id: { type: 'string', nullable: true },
     created_at: ts('Fecha de creación'),
     updated_at: ts('Última modificación'),
@@ -724,7 +757,9 @@ Object.assign(openapiSchemas, {
     campaign_id: '5', organization_id: '1', connection_id: '2', property_id: '3', nombre: 'Lanzamiento Aurora',
     objetivo: 'mensajes', destino: 'whatsapp', estado: 'local_draft', presupuesto_maximo: 15, moneda: 'USD',
     fecha_inicio: null, fecha_fin: null, titulo: 'Conoce Aurora', copy: 'Agenda tu visita hoy.',
-    cta: 'Enviar mensaje', creative_url: null, meta_campaign_id: null,
+    duration_days: null, cta: 'Enviar mensaje', creative_url: null, meta_page_id: null,
+    meta_instagram_id: null, target_location_key: null, target_location_country_code: null,
+    privacy_policy_url: null, media_type: null, meta_campaign_id: null,
     created_at: '2026-03-06T10:30:00.000Z', updated_at: '2026-03-06T10:30:00.000Z',
   }, 'Contrato REST de campaña, traducido sobre campanias_publicitarias'),
   CampaignInput: contractSchema({
@@ -734,7 +769,13 @@ Object.assign(openapiSchemas, {
     presupuesto_maximo: { type: 'number' }, moneda: { type: 'string' }, estado: { type: 'string' },
     fecha_inicio: { type: 'string', nullable: true }, fecha_fin: { type: 'string', nullable: true },
     titulo: { type: 'string', nullable: true }, copy: { type: 'string' }, cta: { type: 'string', nullable: true },
-    creative_url: { type: 'string', nullable: true },
+    duration_days: { type: 'number', nullable: true }, creative_url: { type: 'string', nullable: true },
+    meta_page_id: { type: 'string', nullable: true }, meta_instagram_id: { type: 'string', nullable: true },
+    target_location_key: { type: 'string', nullable: true },
+    target_location_name: { type: 'string', nullable: true },
+    target_location_country_code: { type: 'string', nullable: true },
+    privacy_policy_url: { type: 'string', nullable: true },
+    media_type: { type: 'string', nullable: true, enum: ['image', 'video'] },
   }, ['nombre', 'objetivo', 'presupuesto_maximo', 'copy'], {
     nombre: 'Lanzamiento Aurora', property_id: '3', connection_id: '2', objetivo: 'mensajes',
     destino: 'whatsapp', presupuesto_maximo: 15, moneda: 'USD', copy: 'Agenda tu visita hoy.',
@@ -812,11 +853,13 @@ Object.assign(openapiSchemas, {
     property_id: stringId('ID de propiedad'),
     template_id: stringId('ID de plantilla'),
     model_id: stringId('ID de modelo'),
+    idempotency_key: { type: 'string', minLength: 1, maxLength: 120 },
+    quoted_credits: { type: 'integer', minimum: 0, description: 'Costo cotizado por el servidor que el usuario confirmó' },
     modo: { type: 'string', enum: ['facil', 'pro'] },
     prompt: { type: 'string', minLength: 1, maxLength: 10000 },
     parametros: { type: 'object' },
-  }, ['model_id', 'prompt'], {
-    property_id: '3', template_id: '2', model_id: '1', modo: 'facil',
+  }, ['model_id', 'idempotency_key', 'quoted_credits', 'prompt'], {
+    property_id: '3', template_id: '2', model_id: '1', idempotency_key: 'generation-2026-03-06-001', quoted_credits: 10, modo: 'facil',
     prompt: 'Render fotorrealista de la propiedad.', parametros: { ratio: '9:16' },
   }, 'Payload de generación; el costo y estado los calcula el API'),
   CreditWallet: contractSchema({
@@ -836,19 +879,20 @@ Object.assign(openapiSchemas, {
     organization_id: stringId('ID de empresa'),
     tipo: { type: 'string', enum: ['reserva', 'consumo', 'devolucion', 'recarga', 'ajuste'] },
     monto: { type: 'integer' },
+    creditos: { type: 'integer', minimum: 0, description: 'Créditos involucrados en el movimiento' },
     generation_id: stringId('ID de generación'),
     descripcion: { type: 'string', nullable: true },
     idempotency_key: { type: 'string', nullable: true },
     created_at: ts('Fecha de creación'),
-  }, ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'created_at'], {
+  }, ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'creditos', 'created_at'], {
     transaction_id: '1', wallet_id: '8cbb1b26-2e12-4ca1-9af0-26010f44f001', organization_id: '1',
-    tipo: 'recarga', monto: 25, generation_id: null, descripcion: 'Créditos de bienvenida IMVOLT',
+    tipo: 'recarga', monto: 25, creditos: 25, generation_id: null, descripcion: 'Créditos de bienvenida IMVOLT',
     idempotency_key: 'welcome:1', created_at: '2026-03-06T09:00:00.000Z',
   }, 'Movimiento inmutable del ledger de créditos'),
   CreditRechargeInput: contractSchema({
     monto: { type: 'integer', minimum: 1, maximum: 1000000 },
-    idempotency_key: { type: 'string', nullable: true },
-  }, ['monto'], { monto: 25 }, 'Payload de recarga simulada'),
+    idempotency_key: { type: 'string', minLength: 1, maxLength: 120 },
+  }, ['monto', 'idempotency_key'], { monto: 25, idempotency_key: 'purchase-2026-03-06-001' }, 'Payload de recarga simulada'),
 });
 
 /** Nombres de esquema disponibles para `$ref`. */

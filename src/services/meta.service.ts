@@ -90,6 +90,7 @@ export interface PublishCampaniaInput {
   validateOnly?: boolean;
   leadAd?: {
     pageId: string;
+    instagramActorId?: string;
     locationKey: string;
     locationCountryCode: string;
     privacyPolicyUrl: string;
@@ -115,6 +116,8 @@ export interface PublishCampaniaResult {
   meta_lead_form_id?: string | null;
 }
 
+export type MetaCampaignDeliveryState = 'active' | 'published_paused' | 'archived';
+
 /** Objetivo del catálogo IMVOLT → objetivo ODAX de Meta. */
 const OBJETIVO_META: Record<string, string> = {
   mensajes: 'OUTCOME_ENGAGEMENT',
@@ -139,6 +142,55 @@ function objetivoMeta(objetivo: string): string {
 }
 
 const normalizarCuenta = (id: string): string => (id.startsWith('act_') ? id : `act_${id}`);
+
+interface MetaDeliveryStatus {
+  status?: string;
+  effective_status?: string;
+}
+
+async function getMetaDeliveryStatus(id: string, accessToken: string): Promise<MetaDeliveryStatus> {
+  try {
+    const { data } = await axios.get<MetaDeliveryStatus>(
+      `${graphBaseUrl()}/${encodeURIComponent(id)}`,
+      {
+        params: { fields: 'status,effective_status', access_token: accessToken },
+        timeout: 15000,
+      },
+    );
+    return data;
+  } catch (error) {
+    const meta = (error as {
+      response?: { data?: { error?: { code?: number } } };
+    }).response?.data?.error;
+    console.error('[meta] no se pudo sincronizar el estado del anuncio', meta?.code ?? 'sin código');
+    throw new HttpError(502, 'Meta no pudo confirmar el estado actual de la campaña.');
+  }
+}
+
+async function syncCampaignDeliveryStatus(input: {
+  campaignId: string;
+  adsetId?: string | null;
+  adId?: string | null;
+  credentials: MetaCredentials;
+}): Promise<MetaCampaignDeliveryState> {
+  if (!/^\d{1,30}$/.test(input.campaignId)) {
+    throw new ValidationError('Solo se puede sincronizar una campaña creada realmente en Meta.');
+  }
+  if ([input.adsetId, input.adId].some((id) => id != null && !/^\d{1,30}$/.test(id))) {
+    throw new ValidationError('Los identificadores guardados del conjunto o anuncio no son válidos.');
+  }
+  const ids = [input.campaignId, input.adsetId, input.adId].filter(
+    (id): id is string => Boolean(id && /^\d{1,30}$/.test(id)),
+  );
+  const statuses = await Promise.all(ids.map((id) => getMetaDeliveryStatus(id, input.credentials.accessToken)));
+  if (statuses.some((status) => ['ARCHIVED', 'DELETED'].includes(status.status ?? ''))) {
+    return 'archived';
+  }
+  return statuses.length > 0 &&
+    statuses.every((status) => status.status === 'ACTIVE' && status.effective_status === 'ACTIVE')
+    ? 'active'
+    : 'published_paused';
+}
 
 interface MetaObjectResponse {
   id: string;
@@ -231,6 +283,7 @@ async function createPausedLeadAd(input: PublishCampaniaInput): Promise<PublishC
   }
   if (
     !/^\d{1,30}$/.test(leadAd.pageId) ||
+    (leadAd.instagramActorId && !/^\d{1,30}$/.test(leadAd.instagramActorId)) ||
     !/^\d{1,30}$/.test(leadAd.locationKey) ||
     !/^[A-Z]{2}$/.test(leadAd.locationCountryCode)
   ) {
@@ -325,6 +378,7 @@ async function createPausedLeadAd(input: PublishCampaniaInput): Promise<PublishC
     const creativeSpec = leadAd.mediaType === 'image'
       ? {
           page_id: leadAd.pageId,
+          ...(leadAd.instagramActorId ? { instagram_actor_id: leadAd.instagramActorId } : {}),
           link_data: {
             image_hash: imageHash,
             link: 'https://www.facebook.com/',
@@ -338,6 +392,7 @@ async function createPausedLeadAd(input: PublishCampaniaInput): Promise<PublishC
         }
       : {
           page_id: leadAd.pageId,
+          ...(leadAd.instagramActorId ? { instagram_actor_id: leadAd.instagramActorId } : {}),
           video_data: {
             video_id: videoId,
             message: leadAd.copy,
@@ -474,4 +529,10 @@ async function fetchInsights(campaign: Campana): Promise<{
   };
 }
 
-export const metaService = { validate, publishPaused, publishCampaniaPaused, fetchInsights };
+export const metaService = {
+  validate,
+  publishPaused,
+  publishCampaniaPaused,
+  syncCampaignDeliveryStatus,
+  fetchInsights,
+};

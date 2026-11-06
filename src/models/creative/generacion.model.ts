@@ -32,6 +32,24 @@ export const ESTADOS_FINALES: ReadonlySet<string> = new Set([
   'canceled',
 ]);
 
+const TRANSICIONES_PERMITIDAS: Record<GeneracionEstado, ReadonlySet<GeneracionEstado>> = {
+  created: new Set(['quoted', 'failed', 'canceled']),
+  quoted: new Set(['credits_reserved', 'failed', 'canceled']),
+  credits_reserved: new Set(['queued', 'failed', 'canceled']),
+  queued: new Set(['processing', 'completed', 'failed', 'canceled']),
+  processing: new Set(['completed', 'failed', 'canceled']),
+  completed: new Set(),
+  failed: new Set(),
+  canceled: new Set(),
+};
+
+export function puedeTransicionarGeneracion(
+  actual: GeneracionEstado,
+  siguiente: GeneracionEstado,
+): boolean {
+  return TRANSICIONES_PERMITIDAS[actual].has(siguiente);
+}
+
 /** Fila de `public.generaciones`. */
 export interface Generacion {
   generacion_id: number;
@@ -43,6 +61,7 @@ export interface Generacion {
   prompt: string;
   parametros: Record<string, unknown>;
   estado: GeneracionEstado;
+  idempotency_key?: string | null;
   creditos_costo: number;
   peticion_proveedor_id: string | null;
   error_mensaje: string | null;

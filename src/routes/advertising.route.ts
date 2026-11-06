@@ -19,10 +19,14 @@ export {
  *       oficial: estado `PAUSED` y categoría especial `HOUSING`. **Nunca activa
  *       gasto**; el presupuesto y la segmentación se definen después en el
  *       conjunto de anuncios. Usa la conexión activa de Meta Ads de la empresa.
- *       Requiere rol propietario,
+ *       Requiere aprobación explícita previa, un `Idempotency-Key` UUID v4 y rol propietario,
  *       administrador o marketing con el permiso `gestionar_campanas`.
  *     tags: [Publicidad]
  *     parameters:
+ *       - in: header
+ *         name: Idempotency-Key
+ *         required: true
+ *         schema: { type: string, format: uuid }
  *       - in: path
  *         name: id
  *         required: true
@@ -64,4 +68,92 @@ export {
  *         description: La campaña ya fue publicada o se está publicando
  *       502:
  *         description: Meta rechazó la petición (se devuelve su mensaje público)
+ */
+
+/**
+ * @swagger
+ * /api/v1/campaigns/strategist:
+ *   post:
+ *     summary: Genera estrategia y variantes A/B desde la ficha de propiedad
+ *     tags: [Publicidad]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [property_id, objetivo]
+ *             properties:
+ *               property_id: { type: string }
+ *               objetivo: { type: string, enum: [mensajes, formularios, visitas, trafico, branding] }
+ *     responses:
+ *       200: { description: Ángulos, copies, CTA, guiones y checklist editorial }
+ *       400: { $ref: '#/components/responses/BadRequest' }
+ *       404: { description: La propiedad no existe o es de otra empresa }
+ */
+
+/**
+ * @swagger
+ * /api/v1/campaigns/{id}/validate:
+ *   post:
+ *     summary: Valida un borrador local
+ *     tags: [Publicidad]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Campaña validada }
+ *       409: { description: Estado de campaña no válido }
+ */
+
+/**
+ * @swagger
+ * /api/v1/campaigns/{id}/request-approval:
+ *   post:
+ *     summary: Envía una campaña validada a aprobación
+ *     tags: [Publicidad]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Campaña pendiente de aprobación explícita }
+ *       409: { description: La campaña no está validada }
+ */
+
+/**
+ * @swagger
+ * /api/v1/campaigns/{id}/approve:
+ *   post:
+ *     summary: Aprueba explícitamente la campaña (propietario o administrador)
+ *     tags: [Publicidad]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Campaña aprobada }
+ *       403: { description: Requiere propietario o administrador }
+ *       409: { description: La campaña no está pendiente de aprobación }
+ */
+
+/**
+ * @swagger
+ * /api/v1/campaigns/{id}/sync-status:
+ *   post:
+ *     summary: Sincroniza el estado de entrega leyendo Meta (no activa gasto)
+ *     tags: [Publicidad]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Estado de entrega sincronizado }
+ *       409: { description: La campaña no está publicada en Meta }
+ *       502: { description: Meta no pudo confirmar el estado }
  */

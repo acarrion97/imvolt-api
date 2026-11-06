@@ -1,6 +1,8 @@
 // models/creative.model.ts
 // Tipos compartidos del módulo creativo (estudio IA / Higgsfield).
 
+import type { GeneracionEstado } from './generacion.model';
+
 /** Tipo de medio que genera el proveedor de IA. */
 export type MediaType = 'image' | 'video';
 
@@ -8,4 +10,4 @@ export type MediaType = 'image' | 'video';
 export type MediaFormat = '16:9' | '9:16' | '1:1' | '4:5';
 
 /** Estados de un job creativo encolado hacia el proveedor. */
-export type GenerationStatus = 'created' | 'credits_reserved' | 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type GenerationStatus = GeneracionEstado;

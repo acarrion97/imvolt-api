@@ -38,9 +38,10 @@ las tablas padre siempre aparecen antes que las hijas.
 | Leads | 0021 |
 | Brand Kit | 0022 – 0024 |
 | Auditoría | 0025 |
-| Cambios incrementales | 0026 – 0029, 0036 |
+| Cambios incrementales | 0026 – 0029, 0036 – 0039 |
 | Semillas | 0030 – 0035 |
 | Tenancy y datos (2026-10-26/27) | `20261026_add_propiedades_proyecto_fk`, `2026-10-26_tenant_hardening`, `2026-10-27_01` – `_05` |
+| Ledger, generaciones y publicidad | `2026-11-06_01_credit_ledger_atomic`, `2026-11-06_02_creative_module`, `2026-11-06_03_advertising_approval_idempotency` |
 | Publicación en Meta | `2026-10-27_meta_campaign_publish` |
 
 ## Idempotencia
@@ -76,6 +77,22 @@ publicado, entre ellas `brand_assets.siguiente_numero` (0036) y las de Meta
 > estas columnas, `POST /campanias-publicitarias/:id/publicar` fallaba con
 > *"Could not find the 'meta_estado' column ... in the schema cache"* (PGRST204)
 > al pulsar **Enviar a meta**. Única migración pendiente que quedaba.
+
+Las migraciones **0037–0039** agregan el catálogo de planes, la asignación de
+plan a empresas y las configuraciones globales del sistema. Ejecútalas en ese
+orden antes de desplegar una versión de la API que exponga `/api/v1/admin`.
+
+La migración `2026-11-06_02_creative_module.sql` expone las vistas canónicas
+`templates`, `model_registry` y `generation_jobs` sobre las tablas históricas
+en español, y crea `generation_outputs` para persistir los resultados de jobs.
+La API conserva sus rutas y tablas existentes; los outputs se consultan en
+`GET /api/v1/creative/generations/:id/outputs`, con aislamiento por empresa.
+
+La migración `2026-11-06_03_advertising_approval_idempotency.sql` registra el
+historial de aprobación de campañas, la cuenta de Instagram asociada al anuncio
+y la clave idempotente usada para reservar su publicación en Meta. Debe
+ejecutarse antes de desplegar la API que expone las acciones de aprobación y
+publicación protegida.
 
 La migración `2026-10-27_04_campaign_tenant_backfill` solo rellena datos
 (`empresa_id` de campañas existentes) y no deja rastro verificable por esquema:

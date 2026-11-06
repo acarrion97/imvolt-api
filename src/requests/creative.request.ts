@@ -89,13 +89,25 @@ const generacionShape = {
   propiedad_id: fk().allow(null),
   plantilla_id: fk().allow(null),
   modelo_id: fk(),
+  idempotency_key: Joi.string().min(1).max(120),
+  quoted_credits: Joi.number().integer().min(0),
   modo: Joi.string().valid('facil', 'pro').default('facil'),
   prompt: Joi.string().min(1).max(10000),
   parametros: Joi.object().unknown(true).default({}),
 };
 
 export const generacionRequest = new BaseRequest(
-  buildSchemas(generacionShape, { required: ['modelo_id', 'prompt'], defaults: { modo: 'facil', parametros: {} } })
+  buildSchemas(generacionShape, {
+    required: ['modelo_id', 'idempotency_key', 'quoted_credits', 'prompt'],
+    defaults: { modo: 'facil', parametros: {} },
+  })
+);
+
+export const generacionQuoteRequest = new BaseRequest(
+  buildSchemas({
+    modelo_id: fk(),
+    parametros: Joi.object().unknown(true).default({}),
+  }, { required: ['modelo_id'], defaults: { parametros: {} } })
 );
 
 export type GeneracionMediaType = ModeloMediaType;
@@ -103,9 +115,9 @@ export type GeneracionMediaType = ModeloMediaType;
 // ── Recarga de créditos ────────────────────────────────────────────────────
 const rechargeShape = {
   monto: Joi.number().integer().positive().max(1_000_000),
-  idempotency_key: Joi.string().min(1).max(120).allow(null),
+  idempotency_key: Joi.string().min(1).max(120),
 };
 
 export const rechargeRequest = new BaseRequest(
-  buildSchemas(rechargeShape, { required: ['monto'] })
+  buildSchemas(rechargeShape, { required: ['monto', 'idempotency_key'] })
 );

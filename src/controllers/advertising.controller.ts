@@ -1,7 +1,7 @@
 // controllers/advertising.controller.ts
 // CRUD del módulo Publicidad (IMVOLT Ads): objetivos y campañas publicitarias.
 
-import { Request, Response } from 'express';
+import { Request, RequestHandler, Response } from 'express';
 import supabase from '../config/supabaseClient';
 import { createCrudRouter } from '../core/crud.factory';
 import { errorResponse, HttpError, NotFoundError, ValidationError } from '../core/errors';
@@ -19,8 +19,11 @@ import {
   metaOAuthFrontendUrl,
   saveMetaConnections,
   searchMetaAdLocations,
+  validateMetaAdResources,
 } from '../services/meta-oauth.service';
 import { metaService, MetaCredentials } from '../services/meta.service';
+import { strategistService } from '../services/strategist.service';
+import type { PropiedadEstrategica } from '../services/strategist.service';
 import {
   campaignRequest,
   campaniaPublicitariaRequest,
@@ -266,7 +269,375 @@ const campaignFields = {
   estado: 'estado_flujo',
   presupuesto_maximo: 'presupuesto_diario',
   copy: 'copy_anuncio',
+  duration_days: 'duracion_dias',
 };
+
+const rejectClientCampaignState: RequestHandler = (req, _res, next) => {
+  const body = req.body as Record<string, unknown> | undefined;
+  if (body && ('estado' in body || 'estado_flujo' in body)) {
+    next(new ValidationError('El estado de la campaña solo puede cambiar mediante las acciones del flujo.'));
+    return;
+  }
+  next();
+};
+
+const requireEditableCampaign: RequestHandler = async (req, res, next) => {
+  if (req.method === 'POST') {
+    next();
+    return;
+  }
+  try {
+    const { data: campaign, error } = await supabase
+      .from('campanias_publicitarias')
+      .select('empresa_id, estado_flujo')
+      .eq('campania_publicitaria_id', req.params.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!campaign || String(campaign.empresa_id) !== req.organizationId) {
+      res.status(404).json({ message: 'Campaña no encontrada' });
+      return;
+    }
+    if (req.method === 'DELETE') {
+      if (!['local_draft', 'validated'].includes(campaign.estado_flujo)) {
+        res.status(409).json({ message: 'No se pueden eliminar campañas en aprobación o publicación.' });
+        return;
+      }
+      next();
+      return;
+    }
+    if (!['local_draft', 'validated'].includes(campaign.estado_flujo)) {
+      res.status(409).json({ message: 'La campaña ya está en aprobación o publicación y no se puede editar.' });
+      return;
+    }
+    if (campaign.estado_flujo === 'validated') {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body) {
+        res.status(400).json({ message: 'El cuerpo de la actualización no es válido.' });
+        return;
+      }
+      body.estado_flujo = 'local_draft';
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+async function campaignById(id: number, companyId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .from('campanias_publicitarias')
+    .select('*, objetivo_publicidad(nombre)')
+    .eq('campania_publicitaria_id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data || String(data.empresa_id) !== companyId) throw new NotFoundError('Campaña');
+  return data as Record<string, unknown>;
+}
+
+function assertCampaignReady(campaign: Record<string, unknown>): void {
+  if (
+    !campaign.nombre ||
+    !campaign.propiedad_id ||
+    !campaign.objetivo_publicidad_id ||
+    !(Number(campaign.presupuesto_diario) > 0)
+  ) {
+    throw new ValidationError('Completa propiedad, nombre, objetivo y presupuesto antes de validar.');
+  }
+  if (!campaign.titulo || !campaign.copy_anuncio || String(campaign.copy_anuncio).trim().length < 10) {
+    throw new ValidationError('Completa el título y el copy del anuncio antes de validar.');
+  }
+  if (!/^https:\/\/\S+$/i.test(String(campaign.creative_url ?? ''))) {
+    throw new ValidationError('Añade la URL HTTPS pública del creativo aprobado.');
+  }
+  if (
+    !/^\d{1,30}$/.test(String(campaign.meta_page_id ?? '')) ||
+    !/^\d{1,30}$/.test(String(campaign.target_location_key ?? '')) ||
+    !/^[A-Z]{2}$/.test(String(campaign.target_location_country_code ?? ''))
+  ) {
+    throw new ValidationError('Selecciona una Página de Facebook y una ciudad de Meta con jurisdicción confirmada.');
+  }
+  if (!/^https:\/\/\S+$/i.test(String(campaign.privacy_policy_url ?? ''))) {
+    throw new ValidationError('La política de privacidad debe tener una URL pública HTTPS.');
+  }
+  if (!['image', 'video'].includes(String(campaign.media_type ?? ''))) {
+    throw new ValidationError('Selecciona si el creativo aprobado es una imagen o un video.');
+  }
+  const start = Date.parse(String(campaign.fecha_inicio ?? ''));
+  const end = Date.parse(String(campaign.fecha_fin ?? ''));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= Date.now() || end <= start) {
+    throw new ValidationError('Indica un periodo futuro válido para la campaña.');
+  }
+}
+
+async function assertOwnedActiveProperty(
+  campaign: Record<string, unknown>,
+  companyId: string,
+): Promise<void> {
+  const propertyId = Number(campaign.propiedad_id);
+  if (!Number.isSafeInteger(propertyId) || propertyId <= 0) {
+    throw new ValidationError('Selecciona una propiedad antes de continuar.');
+  }
+  const { data: property, error } = await supabase
+    .from('propiedades')
+    .select('empresa_id, estado')
+    .eq('propiedad_id', propertyId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!property || String(property.empresa_id) !== companyId) throw new NotFoundError('Propiedad');
+  if (property.estado === 'inactivo') {
+    throw new ValidationError('La propiedad no está activa; confirma su estado antes de continuar.');
+  }
+}
+
+async function validarCampania(req: Request, res: Response): Promise<void> {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('Identificador inválido.');
+    const campaign = await campaignById(id, req.organizationId as string);
+    if (campaign.estado_flujo !== 'local_draft') {
+      throw new HttpError(409, 'Solo se pueden validar campañas en borrador local.');
+    }
+    assertCampaignReady(campaign);
+    await assertOwnedActiveProperty(campaign, req.organizationId as string);
+    const { data, error } = await supabase
+      .from('campanias_publicitarias')
+      .update({ estado_flujo: 'validated' })
+      .eq('campania_publicitaria_id', id)
+      .eq('empresa_id', Number(req.organizationId))
+      .eq('estado_flujo', 'local_draft')
+      .select('*, objetivo_publicidad(nombre)')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new HttpError(409, 'La campaña cambió de estado; vuelve a cargarla.');
+    await logAudit('campanias_publicitarias', 'UPDATE', id, { accion: 'campaign_validated' }, {
+      authUserId: req.userId,
+      usuarioId: req.localUsuarioId,
+      empresaId: req.organizationId,
+    });
+    res.json(campaignResource.format(data));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function solicitarAprobacion(req: Request, res: Response): Promise<void> {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('Identificador inválido.');
+    const campaign = await campaignById(id, req.organizationId as string);
+    if (campaign.estado_flujo !== 'validated') {
+      throw new HttpError(409, 'Valida la campaña antes de solicitar aprobación.');
+    }
+    assertCampaignReady(campaign);
+    await assertOwnedActiveProperty(campaign, req.organizationId as string);
+    const { data, error } = await supabase
+      .from('campanias_publicitarias')
+      .update({ estado_flujo: 'awaiting_approval' })
+      .eq('campania_publicitaria_id', id)
+      .eq('empresa_id', Number(req.organizationId))
+      .eq('estado_flujo', 'validated')
+      .select('*, objetivo_publicidad(nombre)')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new HttpError(409, 'La campaña cambió de estado; vuelve a cargarla.');
+
+    const { error: approvalError } = await supabase.from('campaign_approvals').insert({
+      campania_publicitaria_id: id,
+      empresa_id: Number(req.organizationId),
+      accion: 'requested',
+      actor_user_id: req.userId ?? null,
+      snapshot: {
+        nombre: campaign.nombre,
+        objetivo_publicidad_id: campaign.objetivo_publicidad_id,
+        presupuesto_diario: campaign.presupuesto_diario,
+        moneda: campaign.moneda,
+        titulo: campaign.titulo,
+        copy_anuncio: campaign.copy_anuncio,
+        creative_url: campaign.creative_url,
+      },
+    });
+    if (approvalError) {
+      await supabase
+        .from('campanias_publicitarias')
+        .update({ estado_flujo: 'validated' })
+        .eq('campania_publicitaria_id', id)
+        .eq('estado_flujo', 'awaiting_approval');
+      throw new Error(approvalError.message);
+    }
+    await logAudit('campanias_publicitarias', 'UPDATE', id, { accion: 'approval_requested' }, {
+      authUserId: req.userId,
+      usuarioId: req.localUsuarioId,
+      empresaId: req.organizationId,
+    });
+    res.json(campaignResource.format(data));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function decidirAprobacion(req: Request, res: Response, decision: 'approved' | 'rejected'): Promise<void> {
+  let approvalId: number | null = null;
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('Identificador inválido.');
+    const comment = typeof req.body?.comentario === 'string' ? req.body.comentario.trim() : '';
+    if (comment.length > 1000) throw new ValidationError('El comentario no puede superar 1000 caracteres.');
+    const campaign = await campaignById(id, req.organizationId as string);
+    if (campaign.estado_flujo !== 'awaiting_approval') {
+      throw new HttpError(409, 'Solo se pueden decidir campañas pendientes de aprobación.');
+    }
+
+    const { data: approval, error: insertError } = await supabase
+      .from('campaign_approvals')
+      .insert({
+        campania_publicitaria_id: id,
+        empresa_id: Number(req.organizationId),
+        accion: decision,
+        actor_user_id: req.userId ?? null,
+        comentario: comment || null,
+        snapshot: {
+          nombre: campaign.nombre,
+          objetivo_publicidad_id: campaign.objetivo_publicidad_id,
+          presupuesto_diario: campaign.presupuesto_diario,
+          moneda: campaign.moneda,
+          titulo: campaign.titulo,
+          copy_anuncio: campaign.copy_anuncio,
+          creative_url: campaign.creative_url,
+        },
+      })
+      .select('aprobacion_id')
+      .single();
+    if (insertError) throw new Error(insertError.message);
+    approvalId = Number(approval.aprobacion_id);
+
+    const { data, error } = await supabase
+      .from('campanias_publicitarias')
+      .update({ estado_flujo: decision === 'approved' ? 'approved' : 'rejected' })
+      .eq('campania_publicitaria_id', id)
+      .eq('empresa_id', Number(req.organizationId))
+      .eq('estado_flujo', 'awaiting_approval')
+      .select('*, objetivo_publicidad(nombre)')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) {
+      await supabase.from('campaign_approvals').delete().eq('aprobacion_id', approvalId);
+      approvalId = null;
+      throw new HttpError(409, 'La aprobación ya fue procesada por otro usuario.');
+    }
+    await logAudit('campanias_publicitarias', 'UPDATE', id, {
+      accion: `campaign_${decision}`,
+      aprobacion_id: approvalId,
+      comentario: comment || undefined,
+    }, {
+      authUserId: req.userId,
+      usuarioId: req.localUsuarioId,
+      empresaId: req.organizationId,
+    });
+    res.json(campaignResource.format(data));
+  } catch (error) {
+    if (approvalId !== null) {
+      const { data: latest, error: stateError } = await supabase
+        .from('campanias_publicitarias')
+        .select('estado_flujo')
+        .eq('campania_publicitaria_id', Number(req.params.id))
+        .eq('empresa_id', Number(req.organizationId))
+        .maybeSingle();
+      if (!stateError && latest?.estado_flujo === 'awaiting_approval') {
+        const { error: cleanupError } = await supabase
+          .from('campaign_approvals')
+          .delete()
+          .eq('aprobacion_id', approvalId);
+        if (cleanupError) console.error('[advertising] no se pudo limpiar una decisión fallida');
+      }
+    }
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function generarEstrategia(req: Request, res: Response): Promise<void> {
+  try {
+    const propertyId = Number(req.body?.property_id);
+    const objective = req.body?.objetivo;
+    const validObjectives = ['visitas', 'trafico', 'mensajes', 'formularios', 'branding'];
+    if (!Number.isSafeInteger(propertyId) || propertyId <= 0 || !validObjectives.includes(objective)) {
+      throw new ValidationError('Selecciona una propiedad y un objetivo válidos.');
+    }
+    const { data, error } = await supabase
+      .from('propiedades')
+      .select('nombre, ubicacion, precio, disponibilidad, descripcion, estado')
+      .eq('propiedad_id', propertyId)
+      .eq('empresa_id', Number(req.organizationId))
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new NotFoundError('Propiedad');
+    if (data.estado === 'inactivo') throw new ValidationError('La estrategia requiere una propiedad activa.');
+    const propiedad: PropiedadEstrategica = {
+      nombre: String(data.nombre ?? '').trim(),
+      ubicacion: data.ubicacion == null ? null : String(data.ubicacion).trim(),
+      precio: data.precio == null ? null : Number(data.precio),
+      disponibilidad: data.disponibilidad == null ? null : String(data.disponibilidad),
+      descripcion: data.descripcion == null ? null : String(data.descripcion).trim(),
+    };
+    if (!propiedad.nombre || (propiedad.precio !== null && !Number.isFinite(propiedad.precio))) {
+      throw new ValidationError('La ficha de propiedad no contiene datos válidos.');
+    }
+    res.json(strategistService.build({ propiedad, objetivo: objective }));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function sincronizarEstadoMeta(req: Request, res: Response): Promise<void> {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new ValidationError('Identificador inválido.');
+    const campaign = await campaignById(id, req.organizationId as string);
+    if (!['published_paused', 'active'].includes(String(campaign.estado_flujo))) {
+      throw new HttpError(409, 'Solo se puede sincronizar una campaña ya publicada en Meta.');
+    }
+    if (!campaign.meta_campaign_id) {
+      throw new HttpError(409, 'La campaña no tiene un ID real de Meta para sincronizar.');
+    }
+    const credentials = await credencialesMeta(
+      req.organizationId as string,
+      campaign.conexion_id == null ? null : Number(campaign.conexion_id),
+    );
+    if (!credentials) throw new HttpError(503, 'Conecta Meta antes de sincronizar el estado.');
+
+    const state = await metaService.syncCampaignDeliveryStatus({
+      campaignId: String(campaign.meta_campaign_id),
+      adsetId: campaign.meta_adset_id == null ? null : String(campaign.meta_adset_id),
+      adId: campaign.meta_ad_id == null ? null : String(campaign.meta_ad_id),
+      credentials,
+    });
+    const { data, error } = await supabase
+      .from('campanias_publicitarias')
+      .update({ estado_flujo: state })
+      .eq('campania_publicitaria_id', id)
+      .eq('empresa_id', Number(req.organizationId))
+      .in('estado_flujo', ['published_paused', 'active'])
+      .select('*, objetivo_publicidad(nombre)')
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new HttpError(409, 'La campaña cambió de estado; vuelve a cargarla.');
+    await logAudit('campanias_publicitarias', 'UPDATE', id, {
+      accion: 'meta_status_synchronized',
+      estado_flujo: state,
+    }, {
+      authUserId: req.userId,
+      usuarioId: req.localUsuarioId,
+      empresaId: req.organizationId,
+    });
+    res.json(campaignResource.format(data));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
 
 // ── Campaigns: contrato inglés del frontend sobre campanias_publicitarias ──
 export const { router: campaignRouter } = createCrudRouter({
@@ -280,15 +651,59 @@ export const { router: campaignRouter } = createCrudRouter({
   writeMiddlewares: [
     writeByMarketing,
     requirePermission('gestionar_campanas'),
+    rejectClientCampaignState,
     translateBody(campaignFields),
     resolveField('objetivo', 'objetivo_publicidad_id', (value) => resolverObjetivo(value)),
     forceEmpresa,
     requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id'),
     requireOwnedRef('conexion_id', 'conexiones', 'conexion_id'),
+    requireEditableCampaign,
   ],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
+  extraRoutes: (router) => {
+    router.post(
+      '/strategist',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      generarEstrategia,
+    );
+    router.post(
+      '/:id/validate',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      validarCampania,
+    );
+    router.post(
+      '/:id/request-approval',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      solicitarAprobacion,
+    );
+    router.post(
+      '/:id/sync-status',
+      ...requireOrg,
+      writeByMarketing,
+      requirePermission('gestionar_campanas'),
+      sincronizarEstadoMeta,
+    );
+    router.post(
+      '/:id/approve',
+      ...requireOrg,
+      writeByOwnerOrAdmin,
+      (req, res) => void decidirAprobacion(req, res, 'approved'),
+    );
+    router.post(
+      '/:id/reject',
+      ...requireOrg,
+      writeByOwnerOrAdmin,
+      (req, res) => void decidirAprobacion(req, res, 'rejected'),
+    );
+  },
 });
 
 // ── Publicación en Meta ─────────────────────────────────────────────────────
@@ -355,6 +770,10 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
   const id = Number(req.params.id);
   try {
     if (!Number.isInteger(id) || id <= 0) throw new ValidationError('Identificador inválido');
+    const idempotencyKey = req.get('Idempotency-Key') ?? '';
+    if (!/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(idempotencyKey)) {
+      throw new ValidationError('Envía un Idempotency-Key UUID v4 para publicar la campaña.');
+    }
     const validarSolo = req.body?.validar_solo === true;
 
     const { data: campania, error } = await supabase
@@ -368,9 +787,36 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
     if (!campania || String(campania.empresa_id) !== req.organizationId) {
       throw new NotFoundError('Campaña publicitaria');
     }
+    if (campania.meta_campaign_id) {
+      if (campania.meta_idempotency_key !== idempotencyKey) {
+        throw new HttpError(409, 'La campaña ya se publicó con otra clave de idempotencia.');
+      }
+      res.json({
+        message: 'Resultado de publicación recuperado',
+        campania_publicitaria_id: id,
+        meta_estado: 'published_paused',
+        meta_campaign_id: campania.meta_campaign_id,
+        meta_adset_id: campania.meta_adset_id ?? null,
+        meta_adcreative_id: campania.meta_adcreative_id ?? null,
+        meta_ad_id: campania.meta_ad_id ?? null,
+        meta_lead_form_id: campania.meta_lead_form_id ?? null,
+        simulado: String(campania.meta_campaign_id).startsWith('META-SIM-'),
+        validado_solo: false,
+        replayed: true,
+      });
+      return;
+    }
     if (campania.estado === 'inactivo') throw new ValidationError('La campaña está inactiva');
-    if (campania.meta_campaign_id || campania.meta_estado) {
-      throw new HttpError(409, 'La campaña ya fue publicada (o se está publicando) en Meta');
+    if (campania.estado_flujo !== 'approved') {
+      throw new HttpError(409, 'La campaña debe tener aprobación explícita antes de enviarse a Meta.');
+    }
+    assertCampaignReady(campania);
+    await assertOwnedActiveProperty(campania, req.organizationId as string);
+    if (campania.meta_estado) {
+      throw new HttpError(409, 'La campaña ya se está publicando en Meta.');
+    }
+    if (campania.meta_idempotency_key && campania.meta_idempotency_key !== idempotencyKey) {
+      throw new HttpError(409, 'Esta campaña ya reservó otra clave de idempotencia; reintenta con la misma clave.');
     }
     if (!(Number(campania.presupuesto_diario) > 0)) {
       throw new ValidationError('El presupuesto diario debe ser mayor a cero');
@@ -394,6 +840,9 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
         ? {
             leadAd: {
               pageId: String(campania.meta_page_id ?? ''),
+              ...(campania.meta_instagram_id
+                ? { instagramActorId: String(campania.meta_instagram_id) }
+                : {}),
               locationKey: String(campania.target_location_key ?? ''),
               locationCountryCode: String(campania.target_location_country_code ?? ''),
               privacyPolicyUrl: String(campania.privacy_policy_url ?? ''),
@@ -428,6 +877,15 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
         'La moneda del borrador no coincide con la cuenta publicitaria. Actualiza el borrador o vuelve a conectar Meta.',
       );
     }
+    if (input.leadAd && credentials) {
+      await validateMetaAdResources(credentials.accessToken, {
+        pageId: input.leadAd.pageId,
+        instagramId: input.leadAd.instagramActorId,
+        locationKey: input.leadAd.locationKey,
+        locationName: String(campania.target_location_name ?? ''),
+        countryCode: input.leadAd.locationCountryCode,
+      });
+    }
 
     if (validarSolo) {
       const r = await metaService.publishCampaniaPaused({ ...input, validateOnly: true });
@@ -443,13 +901,37 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
     // Reserva atómica: solo UNA petición concurrente pasa de "sin publicar" a "publicando".
     const { data: reserva, error: errReserva } = await supabase
       .from('campanias_publicitarias')
-      .update({ meta_estado: 'publicando' })
+      .update({ meta_estado: 'publicando', meta_idempotency_key: idempotencyKey })
       .eq('campania_publicitaria_id', id)
+      .eq('empresa_id', Number(req.organizationId))
+      .eq('estado_flujo', 'approved')
       .is('meta_campaign_id', null)
       .is('meta_estado', null)
+      .or(`meta_idempotency_key.is.null,meta_idempotency_key.eq.${idempotencyKey}`)
       .select('campania_publicitaria_id');
     if (errReserva) throw new Error(errReserva.message);
-    if (!reserva?.length) throw new HttpError(409, 'La campaña ya se está publicando en Meta');
+    if (!reserva?.length) {
+      const { data: latest, error: latestError } = await supabase
+        .from('campanias_publicitarias')
+        .select('meta_estado, meta_campaign_id, meta_idempotency_key')
+        .eq('campania_publicitaria_id', id)
+        .eq('empresa_id', Number(req.organizationId))
+        .maybeSingle();
+      if (latestError) throw new Error(latestError.message);
+      if (latest?.meta_campaign_id && latest.meta_idempotency_key === idempotencyKey) {
+        res.json({
+          message: 'Resultado de publicación recuperado',
+          campania_publicitaria_id: id,
+          meta_estado: 'published_paused',
+          meta_campaign_id: latest.meta_campaign_id,
+          simulado: String(latest.meta_campaign_id).startsWith('META-SIM-'),
+          validado_solo: false,
+          replayed: true,
+        });
+        return;
+      }
+      throw new HttpError(409, 'La publicación está en curso o la campaña cambió de estado.');
+    }
     reservada = true;
 
     const r = await metaService.publishCampaniaPaused(input);
@@ -496,11 +978,18 @@ async function publicarEnMeta(req: Request, res: Response): Promise<void> {
       campania_publicitaria_id: id,
       meta_estado: 'published_paused',
       ...r,
+      replayed: false,
     });
   } catch (error) {
     if (reservada) {
       // Meta no creó nada: libera la reserva para poder reintentar.
-      await supabase.from('campanias_publicitarias').update({ meta_estado: null }).eq('campania_publicitaria_id', id).is('meta_campaign_id', null);
+      const { error: releaseError } = await supabase
+        .from('campanias_publicitarias')
+        .update({ meta_estado: null })
+        .eq('campania_publicitaria_id', id)
+        .eq('meta_idempotency_key', req.get('Idempotency-Key') ?? '')
+        .is('meta_campaign_id', null);
+      if (releaseError) console.error('[meta] no se pudo liberar la reserva de publicación', id);
     }
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
@@ -516,7 +1005,11 @@ export const { router: campaniaPublicitariaRouter } = createCrudRouter({
   resource: campaniaPublicitariaResource,
   entityName: 'Campaña publicitaria',
   middlewares: [...requireOrg],
-  writeMiddlewares: [writeByMarketing, requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id')],
+  writeMiddlewares: [
+    writeByMarketing,
+    requireEditableCampaign,
+    requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id'),
+  ],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   // Sin columna de empresa: el dueño es el de su propiedad.
   tenantVia: { fk: 'propiedad_id', table: 'propiedades', pk: 'propiedad_id' },

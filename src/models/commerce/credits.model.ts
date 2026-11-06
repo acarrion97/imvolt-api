@@ -16,7 +16,10 @@ export interface CreditTransaction {
   wallet_id: string;
   organization_id: number | string;
   tipo: TipoMovimiento;
+  /** Variación firmada del saldo disponible; consumo confirma una reserva sin volver a descontar. */
   monto: number;
+  /** Créditos involucrados en el movimiento, siempre positivos o cero. */
+  creditos: number;
   generation_id: number | null;
   descripcion: string | null;
   idempotency_key: string | null;
@@ -37,6 +40,6 @@ export const creditWalletsModel = {
 
 export const creditTransactionsModel = {
   table: 'credit_transactions',
-  fields: ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'generation_id', 'descripcion', 'idempotency_key', 'created_at'],
+  fields: ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'creditos', 'generation_id', 'descripcion', 'idempotency_key', 'created_at'],
   primary: 'transaction_id',
 };

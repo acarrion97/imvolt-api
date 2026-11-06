@@ -41,6 +41,7 @@ export interface Campaign {
   presupuesto_diario: number;
   moneda: string;
   duracion_dias: number | null;
+  meta_instagram_id: string | null;
   fecha_inicio: string | null;
   fecha_fin: string | null;
   zona_referencia: string | null;
@@ -91,6 +92,8 @@ export interface CampaignView {
   target_location_country_code: string | null;
   privacy_policy_url: string | null;
   media_type: 'image' | 'video' | null;
+  meta_instagram_id: string | null;
+  duration_days: number | null;
   meta_campaign_id: string | null;
   created_at: string;
   updated_at: string;

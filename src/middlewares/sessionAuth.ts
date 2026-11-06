@@ -20,13 +20,14 @@
 import { NextFunction, Request, Response } from 'express';
 import supabase from '../config/supabaseClient';
 import { errorResponse } from '../core/errors';
-import { readOnly } from './requireRole';
+import { isPlatformAdminEmail, readOnly } from './requireRole';
 
 interface UsuarioRow {
   usuario_id: number;
   email: string;
   empresa_id: number | null;
   estado: string;
+  empresas: { estado: string } | null;
 }
 
 /** Asignación con el rol incrustado y sus permisos (via roles_permisos). */
@@ -82,7 +83,7 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
 
     const { data: usuario, error: usuarioError } = await supabase
       .from('usuarios')
-      .select('usuario_id, email, empresa_id, estado')
+      .select('usuario_id, email, empresa_id, estado, empresas(estado)')
       .eq('email', email)
       .maybeSingle();
 
@@ -91,6 +92,11 @@ export const orgContext = async (req: Request, res: Response, next: NextFunction
     const local = usuario as UsuarioRow | null;
     if (!local || local.estado === 'inactivo') {
       res.status(403).json({ message: 'El usuario no tiene una cuenta activa en la plataforma' });
+      return;
+    }
+
+    if (local.empresas?.estado === 'inactivo' && !isPlatformAdminEmail(email)) {
+      res.status(403).json({ message: 'La empresa tiene el acceso a la plataforma suspendido' });
       return;
     }
 

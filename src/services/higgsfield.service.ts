@@ -36,6 +36,7 @@ export interface HiggsfieldJobStatus {
   request_id: string;
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
   result_url?: string;
+  result_urls?: string[];
   error?: string;
   simulated?: boolean;
 }
@@ -186,6 +187,7 @@ async function getStatus(
       // Placeholder estable: en producción se reemplaza por la descarga a
       // storage propio (§09, paso 6).
       result_url: `https://placehold.co/1200x675/101719/00D94B?text=IMVOLT+${kind.toUpperCase()}+demo`,
+      result_urls: [`https://placehold.co/1200x675/101719/00D94B?text=IMVOLT+${kind.toUpperCase()}+demo`],
     };
   }
 
@@ -208,11 +210,14 @@ async function getStatus(
     };
     const status = statusMap[data.status];
     if (!status) throw new Error(`Estado Higgsfield desconocido: "${data.status}".`);
-    const resultUrl = data.video?.url ?? data.images?.[0]?.url;
+    const resultUrls = data.video?.url
+      ? [data.video.url]
+      : (data.images ?? []).map(({ url }) => url).filter(Boolean);
     return {
       request_id: requestId,
       status,
-      result_url: resultUrl,
+      result_url: resultUrls[0],
+      result_urls: resultUrls,
       error: data.error ?? (data.status === 'nsfw' ? 'El proveedor rechazó el contenido.' : undefined),
     };
   } catch (error) {

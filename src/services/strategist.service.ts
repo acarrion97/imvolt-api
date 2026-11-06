@@ -8,11 +8,26 @@
 // deriva de datos confirmados de la ficha; lo no verificado se omite o se
 // marca como "requiere confirmación".
 
-import { Propiedad } from '../models/property/propiedad.model';
+export interface PropiedadEstrategica {
+  nombre: string;
+  ubicacion: string | null;
+  precio: number | null;
+  disponibilidad: string | null;
+  descripcion: string | null;
+}
 
 export interface EstrategaInput {
-  propiedad: Propiedad;
-  objetivo: 'visitas' | 'mensajes' | 'formularios' | 'branding';
+  propiedad: PropiedadEstrategica;
+  objetivo: 'visitas' | 'trafico' | 'mensajes' | 'formularios' | 'branding';
+}
+
+export interface VarianteCopy {
+  variante: 'A' | 'B';
+  enfoque: string;
+  titular: string;
+  copy_corto: string;
+  copy_largo: string;
+  cta: string;
 }
 
 export interface AnguloCreativo {
@@ -29,8 +44,11 @@ export interface EstrategaOutput {
   titular: string;
   copy_corto: string;
   copy_largo: string;
+  variantes_ab: VarianteCopy[];
   cta: string;
   guion_audiovisual: string;
+  guion_15s: string;
+  guion_30s: string;
   formatos_recomendados: string[];
   checklist_editorial: string[];
   advertencias: string[];
@@ -58,12 +76,15 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
   }
 
   if (propiedad.precio) {
-    const precio = propiedad.precio.toLocaleString('es-EC');
+    const precio = new Intl.NumberFormat('es-EC', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(propiedad.precio);
     angulos.push({
       id: 'precio',
       nombre: 'Valor de referencia',
       enfoque: 'Comunicar el precio de la ficha. Si existe financiamiento verificado, añadirlo explícitamente.',
-      copy_sugerido: `${propiedad.nombre}: desde ${precio}. Consulta condiciones de compra y disponibilidad vigente.`,
+      copy_sugerido: `${propiedad.nombre}: valor registrado ${precio}. Consulta condiciones de compra y disponibilidad vigente.`,
     });
   }
 
@@ -94,6 +115,46 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
     });
   }
 
+  const primerAngulo = angulos[0];
+  const segundoAngulo = angulos[1] ?? {
+    enfoque: 'Presentar la propiedad e invitar a conversar sin añadir atributos no confirmados.',
+    copy_sugerido: `${propiedad.nombre}. Solicita información y conoce los detalles confirmados con un asesor.`,
+  };
+  const ctaPrincipal = {
+    visitas: 'Agenda una visita',
+    trafico: 'Conoce el proyecto',
+    mensajes: 'Enviar mensaje',
+    formularios: 'Solicita información',
+    branding: 'Conoce el proyecto',
+  }[objetivo];
+  const ctaAlternativo = objetivo === 'visitas' ? 'Solicita información' : ctaPrincipal;
+  const variantesAb: VarianteCopy[] = [
+    {
+      variante: 'A',
+      enfoque: primerAngulo.enfoque,
+      titular: propiedad.nombre,
+      copy_corto: primerAngulo.copy_sugerido,
+      copy_largo: [
+        primerAngulo.copy_sugerido,
+        descripcion ? `Descripción confirmada: ${descripcion}` : null,
+        'Solicita información con un asesor para conocer disponibilidad y condiciones de compra.',
+      ].filter(Boolean).join(' '),
+      cta: ctaPrincipal,
+    },
+    {
+      variante: 'B',
+      enfoque: segundoAngulo.enfoque,
+      titular: ubicacion ? `${propiedad.nombre} en ${ubicacion}` : propiedad.nombre,
+      copy_corto: segundoAngulo.copy_sugerido,
+      copy_largo: [
+        segundoAngulo.copy_sugerido,
+        propiedad.disponibilidad === 'disponible' ? 'Confirma la disponibilidad antes de visitar.' : null,
+        'Conversa con un asesor para recibir información y condiciones vigentes.',
+      ].filter(Boolean).join(' '),
+      cta: ctaAlternativo,
+    },
+  ];
+
   const advertencias: string[] = [];
   if (descripcion.toLowerCase().includes('render')) {
     advertencias.push(
@@ -106,27 +167,39 @@ export function build({ propiedad, objetivo }: EstrategaInput): EstrategaOutput 
   if (propiedad.disponibilidad !== 'disponible') {
     advertencias.push(`La disponibilidad de la ficha es "${propiedad.disponibilidad}": no la presentes como disponible.`);
   }
-  advertencias.push('El anunciante debe verificar precio, disponibilidad y condiciones antes de cada publicación.');
+  advertencias.push('La moneda del precio usa el valor por defecto de la aplicación (USD); confirma moneda, precio, disponibilidad y condiciones antes de publicar.');
 
   return {
     propiedad: propiedad.nombre,
     objetivo,
     angulos,
     titular: `${propiedad.nombre}${ubicacion ? ` · ${ubicacion}` : ''}`,
-    copy_corto: angulos[0].copy_sugerido,
+    copy_corto: primerAngulo.copy_sugerido,
     copy_largo: [
-      angulos[0].copy_sugerido,
+      primerAngulo.copy_sugerido,
       descripcion ? `Descripción confirmada: ${descripcion}` : null,
       'Solicita información con un asesor para conocer disponibilidad y condiciones de compra.',
     ]
       .filter(Boolean)
       .join(' '),
-    cta: 'Solicita información',
+    variantes_ab: variantesAb,
+    cta: ctaPrincipal,
     guion_audiovisual: [
       `Plano general de ${propiedad.nombre}${ubicacion ? ` en ${ubicacion}` : ''}, sin modificar geometría ni entorno.`,
       descripcion ? `Recorrido alineado con la descripción de la ficha: ${descripcion}` : 'Recorrido por los espacios visibles de la propiedad.',
       'Cierre con llamado a la acción: solicita información con un asesor.',
       'No añadir textos superpuestos ni escenas no presentes en la fotografía de referencia.',
+    ].join(' '),
+    guion_15s: [
+      `0–3 s: presenta ${propiedad.nombre}${ubicacion ? ` en ${ubicacion}` : ''}.`,
+      descripcion ? `3–11 s: muestra únicamente elementos descritos en la ficha: ${descripcion}` : '3–11 s: muestra la propiedad sin atribuir características no verificadas.',
+      '11–15 s: invita a solicitar información con un asesor.',
+    ].join(' '),
+    guion_30s: [
+      `0–5 s: abre con ${propiedad.nombre}${ubicacion ? ` · ${ubicacion}` : ''}.`,
+      descripcion ? `5–20 s: desarrolla la descripción confirmada: ${descripcion}` : '5–20 s: recorre los espacios visibles sin añadir promesas.',
+      propiedad.precio ? `20–25 s: menciona el valor registrado ${new Intl.NumberFormat('es-EC', { style: 'currency', currency: 'USD' }).format(propiedad.precio)} y aclara que las condiciones deben confirmarse.` : '20–25 s: invita a consultar precio y condiciones vigentes.',
+      '25–30 s: cierra con un llamado a conversar con un asesor.',
     ].join(' '),
     formatos_recomendados: [...FORMATOS_POR_MEDIO.video, ...FORMATOS_POR_MEDIO.imagen],
     checklist_editorial: [

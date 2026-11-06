@@ -26,6 +26,7 @@ const transactionResource = new BaseResource<any, CreditTransactionView>((row) =
   organization_id: String(row.organization_id),
   tipo: row.tipo,
   monto: Number(row.monto),
+  creditos: Number(row.creditos),
   generation_id: row.generation_id == null ? null : String(row.generation_id),
   descripcion: row.descripcion ?? null,
   idempotency_key: row.idempotency_key ?? null,
@@ -68,7 +69,7 @@ const recharge: RequestHandler = async (req: Request, res: Response) => {
     const result = await creditsService.recharge(
       req.organizationId as string,
       payload.monto,
-      payload.idempotency_key ?? undefined,
+      payload.idempotency_key,
     );
     res.status(201).json(walletResource.format(result.wallet));
   } catch (error) {

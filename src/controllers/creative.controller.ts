@@ -10,6 +10,7 @@ import {
   enfoqueComercialRequest,
   formatoRequest,
   generacionRequest,
+  generacionQuoteRequest,
   modeloRequest,
   plantillaRequest,
   tipoPlantillaRequest,
@@ -19,6 +20,7 @@ import {
   enfoqueComercialResource,
   formatoResource,
   generacionResource,
+  generationOutputResource,
   modeloResource,
   plantillaResource,
   tipoPlantillaResource,
@@ -27,7 +29,12 @@ import { requireOrg } from '../middlewares/sessionAuth';
 import { requirePermission, writeByMarketing, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
 import { translateBody, translateQuery } from '../middlewares/contract';
-import { Generacion, ESTADOS_FINALES } from '../models/creative/generacion.model';
+import {
+  Generacion,
+  ESTADOS_FINALES,
+  puedeTransicionarGeneracion,
+  type GeneracionEstado,
+} from '../models/creative/generacion.model';
 import { creditsService } from '../services/credits.service';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import { HiggsfieldCredentials, higgsfieldService } from '../services/higgsfield.service';
@@ -117,6 +124,54 @@ const generationFields = {
 
 const generationService = new BaseService<Generacion>('generaciones', 'generacion_id');
 
+async function persistGenerationOutputs(
+  generation: Generacion,
+  urls: string[],
+): Promise<void> {
+  const uniqueUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
+  if (uniqueUrls.length === 0) return;
+
+  const { data: model, error: modelError } = await supabase
+    .from('modelos_ia')
+    .select('tipo_media')
+    .eq('modelo_id', generation.modelo_id)
+    .maybeSingle();
+  if (modelError) throw new Error(modelError.message);
+  if (!model) throw new NotFoundError('Modelo IA');
+
+  const outputs = uniqueUrls.map((outputUrl, outputIndex) => ({
+    generation_id: generation.generacion_id,
+    output_index: outputIndex,
+    media_type: model.tipo_media,
+    output_url: outputUrl,
+  }));
+  const { error } = await supabase
+    .from('generation_outputs')
+    .upsert(outputs, { onConflict: 'generation_id,output_index' });
+  if (error) throw new Error(`No se pudieron guardar los resultados de la generación: ${error.message}`);
+}
+
+const generationOutputsGet: RequestHandler = async (req, res) => {
+  try {
+    if (!req.organizationId) throw new HttpError(401, 'Sesión no iniciada');
+    const generation = await generationService.getById<Generacion>(req.params.id);
+    if (String(generation.empresa_id) !== req.organizationId) {
+      throw new NotFoundError('Generación');
+    }
+
+    const { data, error } = await supabase
+      .from('generation_outputs')
+      .select('*')
+      .eq('generation_id', generation.generacion_id)
+      .order('output_index', { ascending: true });
+    if (error) throw new Error(error.message);
+    res.json(generationOutputResource.formatMany(data ?? []));
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+};
+
 async function higgsfieldCredentials(empresaId: string): Promise<HiggsfieldCredentials | undefined> {
   const integration = await getCompanyIntegrationConfig(empresaId, 'Higgsfield');
   if (!integration) return undefined;
@@ -152,12 +207,103 @@ async function higgsfieldCredentials(empresaId: string): Promise<HiggsfieldCrede
   };
 }
 
+function quoteGeneration(model: {
+  tipo_media: string;
+  modelo_proveedor_id: string;
+  creditos_cotizacion: number;
+  duracion_min_s: number | null;
+  duracion_max_s: number | null;
+  ratios: unknown;
+}, params: Record<string, unknown>): number {
+  const duration = Number(params.duration ?? model.duracion_min_s ?? 5);
+  if (model.tipo_media === 'video' && (!Number.isFinite(duration) || duration <= 0 ||
+    (model.duracion_min_s != null && duration < model.duracion_min_s) ||
+    (model.duracion_max_s != null && duration > model.duracion_max_s))) {
+    throw new ValidationError('Duración de video fuera de los límites del modelo', [
+      { field: 'parametros.duration', message: `Usa una duración entre ${model.duracion_min_s} y ${model.duracion_max_s} segundos.` },
+    ]);
+  }
+  if (['kling-video/v2.6/pro/text-to-video', 'higgsfield/veo3-video']
+    .includes(model.modelo_proveedor_id) &&
+    duration !== 5 && duration !== 10) {
+    throw new ValidationError('Duración no soportada por el modelo', [
+      { field: 'parametros.duration', message: 'Kling 2.6 admite únicamente 5 o 10 segundos.' },
+    ]);
+  }
+  if (params.ratio && Array.isArray(model.ratios) && !model.ratios.includes(String(params.ratio))) {
+    throw new ValidationError('Formato no soportado por el modelo', [
+      { field: 'parametros.ratio', message: 'Selecciona una relación de aspecto disponible para este modelo.' },
+    ]);
+  }
+  return Number(model.creditos_cotizacion) + (
+    model.tipo_media === 'video' ? Math.max(0, Math.ceil(duration / 5) - 1) : 0
+  );
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+const generationQuote: RequestHandler = async (req, res) => {
+  try {
+    if (!req.organizationId) throw new HttpError(401, 'Sesión no iniciada');
+    const payload = generacionQuoteRequest.validateCreate(req.body);
+    const { data: model, error } = await supabase
+      .from('modelos_ia')
+      .select('*')
+      .eq('modelo_id', payload.modelo_id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!model || model.estado !== 'activo') throw new NotFoundError('Modelo IA disponible');
+
+    const creditCost = quoteGeneration(
+      model,
+      payload.parametros as Record<string, unknown>,
+    );
+    const balance = await creditsService.balance(req.organizationId);
+    res.json({
+      model_id: String(model.modelo_id),
+      credits_cost: creditCost,
+      available_credits: balance,
+      sufficient_credits: balance >= creditCost,
+    });
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+};
+
 const generationCreate: RequestHandler = async (req, res) => {
   let generation: Generacion | undefined;
-  let charged = false;
+  let creditsReserved = false;
   try {
     if (!req.organizationId) throw new HttpError(401, 'Sesión no iniciada');
     const payload = generacionRequest.validateCreate(req.body);
+    const params = payload.parametros as Record<string, unknown>;
+    const existing = await generationService.findOne<Generacion>({
+      empresa_id: Number(req.organizationId),
+      idempotency_key: payload.idempotency_key,
+    });
+    if (existing) {
+      const sameRequest =
+        existing.modelo_id === Number(payload.modelo_id) &&
+        existing.propiedad_id === (payload.propiedad_id ?? null) &&
+        existing.plantilla_id === (payload.plantilla_id ?? null) &&
+        existing.modo === payload.modo &&
+        existing.prompt === payload.prompt &&
+        existing.creditos_costo === payload.quoted_credits &&
+        canonicalJson(existing.parametros) === canonicalJson(params);
+      if (!sameRequest) throw new HttpError(409, 'La clave de idempotencia ya se usó con otra generación');
+      res.status(200).json(generacionResource.format(existing));
+      return;
+    }
+
     const { data: model, error: modelError } = await supabase
       .from('modelos_ia')
       .select('*')
@@ -166,31 +312,14 @@ const generationCreate: RequestHandler = async (req, res) => {
     if (modelError) throw new Error(modelError.message);
     if (!model || model.estado !== 'activo') throw new NotFoundError('Modelo IA disponible');
 
-    const params = payload.parametros as Record<string, unknown>;
+    const creditCost = quoteGeneration(model, params);
     const duration = Number(params.duration ?? model.duracion_min_s ?? 5);
-    if (model.tipo_media === 'video' && (!Number.isFinite(duration) || duration <= 0 ||
-      (model.duracion_min_s != null && duration < model.duracion_min_s) ||
-      (model.duracion_max_s != null && duration > model.duracion_max_s))) {
-      throw new ValidationError('Duración de video fuera de los límites del modelo', [
-        { field: 'parametros.duration', message: `Usa una duración entre ${model.duracion_min_s} y ${model.duracion_max_s} segundos.` },
-      ]);
+    if (payload.quoted_credits !== creditCost) {
+      throw new HttpError(409, 'La cotización cambió. Vuelve a cotizar antes de aceptar la generación.', {
+        quoted_credits: payload.quoted_credits,
+        current_credits: creditCost,
+      });
     }
-    if (['kling-video/v2.6/pro/text-to-video', 'higgsfield/veo3-video']
-      .includes(model.modelo_proveedor_id) &&
-      duration !== 5 && duration !== 10) {
-      throw new ValidationError('Duración no soportada por el modelo', [
-        { field: 'parametros.duration', message: 'Kling 2.6 admite únicamente 5 o 10 segundos.' },
-      ]);
-    }
-    if (params.ratio && Array.isArray(model.ratios) && !model.ratios.includes(String(params.ratio))) {
-      throw new ValidationError('Formato de imagen no soportado por el modelo', [
-        { field: 'parametros.ratio', message: 'Selecciona una relación de aspecto disponible para este modelo.' },
-      ]);
-    }
-
-    const creditCost = Number(model.creditos_cotizacion) + (
-      model.tipo_media === 'video' ? Math.max(0, Math.ceil(duration / 5) - 1) : 0
-    );
     generation = await generationService.create<Generacion>({
       empresa_id: Number(req.organizationId),
       propiedad_id: payload.propiedad_id ?? null,
@@ -199,20 +328,23 @@ const generationCreate: RequestHandler = async (req, res) => {
       modo: payload.modo,
       prompt: payload.prompt,
       parametros: params,
+      idempotency_key: payload.idempotency_key,
       estado: 'created',
-      creditos_costo: creditCost,
+      creditos_costo: 0,
       peticion_proveedor_id: null,
       error_mensaje: null,
     }, auditContext(req));
 
-    try {
-      await creditsService.confirm(req.organizationId, creditCost, String(generation.generacion_id));
-      charged = true;
-    } catch (error) {
-      await generationService.remove(generation.generacion_id, auditContext(req));
-      generation = undefined;
-      throw error;
-    }
+    generation = await generationService.update<Generacion>(generation.generacion_id, {
+      estado: 'quoted',
+      creditos_costo: creditCost,
+    }, auditContext(req));
+
+    await creditsService.reserve(req.organizationId, creditCost, String(generation.generacion_id));
+    creditsReserved = true;
+    generation = await generationService.update<Generacion>(generation.generacion_id, {
+      estado: 'credits_reserved',
+    }, auditContext(req));
 
     const credentials = await higgsfieldCredentials(req.organizationId);
     const job = await higgsfieldService.createJob({
@@ -225,17 +357,22 @@ const generationCreate: RequestHandler = async (req, res) => {
       resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
     }, String(generation.generacion_id), credentials);
 
-    const completed = job.simulated === true;
     const updated = await generationService.update<Generacion>(generation.generacion_id, {
-      estado: completed ? 'completed' : job.status,
+      estado: job.status,
       peticion_proveedor_id: job.request_id,
       error_mensaje: null,
     }, auditContext(req));
     res.status(201).json(generacionResource.format(updated));
   } catch (error) {
-    if (generation && charged) {
+    if (generation) {
       try {
-        await creditsService.refund(req.organizationId as string, generation.creditos_costo, String(generation.generacion_id));
+        if (creditsReserved) {
+          await creditsService.refund(
+            req.organizationId as string,
+            generation.creditos_costo,
+            String(generation.generacion_id),
+          );
+        }
         await generationService.update(generation.generacion_id, {
           estado: 'failed',
           error_mensaje: error instanceof Error ? error.message.slice(0, 1000) : 'No se pudo iniciar la generación',
@@ -260,6 +397,24 @@ const generationGetById: RequestHandler = async (req, res) => {
         ? undefined
         : await higgsfieldCredentials(String(generation.empresa_id));
       const status = await higgsfieldService.getStatus(generation.peticion_proveedor_id, credentials);
+      if (status.status === 'completed') {
+        const outputUrls = status.result_urls?.length
+          ? status.result_urls
+          : status.result_url
+            ? [status.result_url]
+            : [];
+        await persistGenerationOutputs(
+          generation,
+          outputUrls,
+        );
+      }
+      if (status.status === 'completed') {
+        await creditsService.confirm(
+          String(generation.empresa_id),
+          generation.creditos_costo,
+          String(generation.generacion_id),
+        );
+      }
       if (status.status === 'failed' || status.status === 'canceled') {
         const finalStatus = status.status === 'canceled' ? 'canceled' : 'failed';
         await creditsService.refund(
@@ -274,9 +429,13 @@ const generationGetById: RequestHandler = async (req, res) => {
         res.json(generacionResource.format(updated));
         return;
       }
-      if (status.status !== generation.estado || status.result_url) {
+      const nextStatus: GeneracionEstado = status.status;
+      const statusCanAdvance =
+        status.status === generation.estado ||
+        puedeTransicionarGeneracion(generation.estado, nextStatus);
+      if ((statusCanAdvance && status.status !== generation.estado) || status.result_url) {
         const updated = await generationService.update<Generacion>(generation.generacion_id, {
-          estado: status.status,
+          ...(statusCanAdvance ? { estado: nextStatus } : {}),
           parametros: status.result_url
             ? { ...generation.parametros, result_url: status.result_url }
             : generation.parametros,
@@ -311,4 +470,13 @@ export const { router: generacionRouter } = createCrudRouter({
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',
+  extraRoutes: (router) => {
+    router.post(
+      '/quote',
+      ...requireOrg,
+      translateBody(generationFields),
+      generationQuote,
+    );
+    router.get('/:id/outputs', ...requireOrg, generationOutputsGet);
+  },
 });

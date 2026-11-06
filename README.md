@@ -148,8 +148,8 @@ Ejecuta `database/migrations/2026-10-26_tenant_hardening.sql` **antes** de despl
 - `contactos` y `configuraciones-integraciones` incluyen `empresa_id` (campo nuevo, aditivo). Integraciones exigen `gestionar_integraciones` también para leer.
 - `limite` se acota a 500; el JSON del body a 1 MB; errores 5xx con mensaje genérico; `429` en login/registro.
 
-Para asignar al superadministrador que administra el catálogo global de
-plantillas, define `PLATFORM_ADMIN_EMAILS=correo@tu-dominio.com` en `api/.env`
+Para asignar al superadministrador que administra el catálogo global y el panel
+de plataforma, define `PLATFORM_ADMIN_EMAILS=correo@tu-dominio.com` en `api/.env`
 local o en las variables de entorno del servicio API (Render). Admite varios
 correos separados por coma y no distingue mayúsculas. El correo debe coincidir
 con la cuenta de inicio de sesión de IMVOLT. Reinicia o redespliega la API para
@@ -158,11 +158,21 @@ aplicar el cambio. Las plantillas ya son globales: `plantillas` no contiene
 pueden crearlas, editarlas o eliminarlas. El frontend oculta las acciones a
 otros usuarios y la API mantiene la autorización como control definitivo.
 
+El panel `/administracion` requiere ese mismo correo de superadministrador.
+Sus endpoints `/api/v1/admin/planes`, `/api/v1/admin/empresas` y
+`/api/v1/admin/configuraciones` están protegidos en el servidor; la consulta
+global de empresas no modifica las rutas tenant-scoped ya existentes. Antes de
+desplegar, ejecuta las migraciones `0037`–`0039` en orden. Los planes se
+desactivan en vez de borrarse y las empresas nuevas reciben el plan `Esencial`.
+Suspender una empresa bloquea sus llamadas al API; el superadministrador
+conserva acceso al panel para poder reactivarla.
+
 ## Módulos y rutas
 
 | Módulo | Rutas | Contenido |
 |--------|-------|-----------|
 | Auth | `/api/auth` | register (cuenta + empresa + usuario + rol propietario), login, me |
+| Platform Admin | `/api/v1/admin` | Planes y configuraciones globales; listado paginado y administración de empresas (solo superadministrador) |
 
 > `POST /api/auth/login` usa un **cliente Supabase aislado**
 > (`supabaseAuthSession` en `src/config/supabaseClient.ts`): `signInWithPassword`
@@ -345,16 +355,24 @@ Brand Kit:
 
 El catálogo se sirve en `GET /api/v1/modelos`; las generaciones se persisten en
 `generaciones` y se exponen en `GET/POST /api/v1/creative/generations`. El API
-calcula el costo desde el catálogo, valida propiedad/modelo, carga los créditos
-y conserva el identificador de proveedor:
+calcula el costo desde el catálogo, valida propiedad/modelo y conserva el
+identificador de proveedor. `POST .../quote` devuelve el costo del modelo y el
+saldo disponible antes de aceptar la generación. Cada job avanza por
+`created → quoted → credits_reserved → queued → processing → completed/failed/canceled`:
 
 ```
-POST /api/v1/creative/generations      → cotiza, cobra y encola (o completa en simulación)
+POST /api/v1/creative/generations/quote → cotiza desde el catálogo y comprueba el saldo
+POST /api/v1/creative/generations      → cotiza, reserva créditos y encola
 GET  /api/v1/creative/generations/:id  → consulta/persiste el estado del proveedor
 ```
 
-En simulación devuelve una generación completada con costo registrado. Con un
-proveedor real, `GET` consulta el estado y devuelve los créditos si el job falla.
+El cliente debe enviar una `idempotency_key` al crear el job; una repetición con
+la misma clave y payload devuelve la generación original sin volver a reservar.
+La reserva descuenta el saldo disponible una sola vez; la confirmación registra
+el consumo sin un segundo descuento, y los fallos/cancelaciones devuelven la
+reserva. El ledger distingue `monto` (variación de saldo) de `creditos`
+(volumen del movimiento). Tanto en simulación como con un proveedor real, `GET`
+actualiza los estados posteriores a `queued`.
 
 ### Contratos REST de campañas y leads
 
@@ -385,6 +403,9 @@ recibe el App Secret ni el token de Meta.
   `POST /api/v1/billing/recharge` sirven el saldo y el ledger de la empresa.
 - La primera wallet recibe 25 créditos de bienvenida, con movimiento
   idempotente. La recarga es un stub y no representa un cobro real.
+- Cada recarga requiere `idempotency_key`; reserva, confirmación y devolución
+  se aplican transaccionalmente en PostgreSQL. Reintentar una operación con la
+  misma clave y los mismos datos no modifica el saldo dos veces.
 - Los movimientos de transacciones son de solo lectura para el cliente.
 
 ## Proveedores en modo simulado
@@ -418,8 +439,8 @@ cuentas invalida los tokens ya cifrados.
 `META_APP_ID` es el identificador público. Configúralo en el `.env` del
 frontend y como variable de build en Vercel. En el panel Business Login de Meta
 crea una configuración para los permisos publicitarios que necesita la
-integración (`ads_management`, `ads_read`, `pages_show_list` y
-`pages_manage_ads`) y define su ID en
+integración (`ads_management`, `ads_read`, `pages_show_list`,
+`pages_manage_ads` e `instagram_basic`) y define su ID en
 `META_LOGIN_CONFIG_ID`, tanto localmente como en las variables de build de
 Vercel. Configura `META_GRAPH_API_VERSION` en el frontend y el backend con la
 misma versión. Nunca pongas `META_APP_SECRET` ni `META_TOKEN_ENCRYPTION_KEY`
@@ -468,18 +489,26 @@ para los permisos solicitados antes de conectar usuarios que no sean roles de
 la app. La conexión también necesita `pages_show_list` para escoger la página y
 `pages_manage_ads` para crear el formulario instantáneo. Después de añadir esos
 permisos a la configuración Business Login, los usuarios deben volver a
-conectar Meta para otorgarlos. Ejecuta la migración de anuncios y vuelve a
-conectar las cuentas existentes para guardar su moneda de facturación. Cada persona solo podrá seleccionar cuentas
-publicitarias y páginas a las que su Facebook tenga acceso.
+conectar Meta para otorgarlos. `instagram_basic` permite descubrir la cuenta
+profesional de Instagram vinculada a cada Página; la API solo devuelve ese
+recurso si está administrado por la persona que autorizó. Ejecuta la migración
+de anuncios y vuelve a conectar las cuentas existentes para guardar su moneda
+de facturación. Cada persona solo podrá seleccionar cuentas publicitarias,
+páginas y cuentas de Instagram a las que su Facebook tenga acceso.
 
 Desde Estudio, una generación completada puede convertirse en un anuncio de
 formulario: el usuario elige cuenta y página, ciudad disponible en Meta,
 presupuesto diario en la moneda de la cuenta, periodo, título, texto y URL HTTPS
-de privacidad. IMVOLT crea el formulario instantáneo con nombre, correo y
-teléfono, sube el creativo desde la URL pública de Higgsfield y crea campaña,
-conjunto y anuncio pausados. Meta no inicia gasto hasta que se active el anuncio
-desde Meta Ads Manager. Antes de probarlo, ejecuta
-`database/migrations/2026-11-05_06_meta_lead_ads.sql`.
+de privacidad. IMVOLT guarda el anuncio como borrador y solicita aprobación
+explícita; un propietario o administrador debe aprobarlo antes de publicar.
+La publicación verifica nuevamente la Página, Instagram y la ciudad/jurisdicción
+contra Meta y crea el formulario instantáneo con nombre, correo y teléfono,
+sube el creativo desde la URL pública de Higgsfield y crea campaña, conjunto y
+anuncio pausados. La clave `Idempotency-Key` evita crear duplicados ante
+reintentos. Meta no inicia gasto hasta que se active el anuncio desde Ads
+Manager. Antes de desplegar la API, ejecuta
+`database/migrations/2026-11-05_06_meta_lead_ads.sql` y
+`database/migrations/2026-11-06_03_advertising_approval_idempotency.sql`.
 
 ### Configurar Higgsfield
 
@@ -561,6 +590,7 @@ npm install
 #      migrations/2026-10-27_05_meta_oauth_tokens.sql
 #      migrations/2026-11-05_meta_oauth_state.sql
 #      migrations/2026-10-27_meta_campaign_publish.sql (publicación Meta)
+#      migrations/2026-11-06_01_credit_ledger_atomic.sql
 #    Las campañas y leads reutilizan las tablas existentes; no se crean tablas
 #    duplicadas para esos recursos.
 #    Si propiedades ya existe y falta su FK a proyectos, ejecuta

@@ -9,7 +9,7 @@ import {
 import axios from 'axios';
 import supabase from '../config/supabaseClient';
 import { config } from '../config/global';
-import { HttpError } from '../core/errors';
+import { HttpError, ValidationError } from '../core/errors';
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const MAX_AD_ACCOUNT_PAGES = 100;
@@ -34,6 +34,7 @@ interface MetaAdAccountsResponse {
 export interface MetaPage {
   id: string;
   name: string;
+  instagram_business_account?: { id: string; username?: string };
 }
 
 export interface MetaAdLocation {
@@ -208,12 +209,12 @@ export async function exchangeMetaSdkToken(
     throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
   }
   const scopes = new Set(debug.scopes ?? []);
-  const missingScopes = ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads']
+  const missingScopes = ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads', 'instagram_basic']
     .filter((scope) => !scopes.has(scope));
   if (missingScopes.length) {
     throw new HttpError(
       403,
-      'La autorización necesita ads_management, ads_read, pages_show_list y pages_manage_ads. Actualiza la configuración de Facebook Login for Business y vuelve a conectar Meta.',
+      'La autorización necesita ads_management, ads_read, pages_show_list, pages_manage_ads e instagram_basic. Actualiza Facebook Login for Business y vuelve a conectar Meta.',
     );
   }
 
@@ -224,7 +225,11 @@ export async function listMetaPages(accessToken: string): Promise<MetaPage[]> {
   const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
   try {
     const { data } = await axios.get<{ data: MetaPage[] }>(`${graphUrl}/me/accounts`, {
-      params: { fields: 'id,name', limit: 100, access_token: accessToken },
+      params: {
+        fields: 'id,name,instagram_business_account{id,username}',
+        limit: 100,
+        access_token: accessToken,
+      },
       timeout: 15000,
     });
     return (data.data ?? []).filter((page) => page.id && page.name);
@@ -256,6 +261,38 @@ export async function searchMetaAdLocations(
     return (data.data ?? []).filter((location) => location.key && location.name);
   } catch {
     throw new HttpError(502, 'Meta no pudo buscar ubicaciones para la segmentación inmobiliaria.');
+  }
+}
+
+export async function validateMetaAdResources(
+  accessToken: string,
+  input: {
+    pageId: string;
+    instagramId?: string;
+    locationKey: string;
+    locationName: string;
+    countryCode: string;
+  },
+): Promise<void> {
+  const [pages, locations] = await Promise.all([
+    listMetaPages(accessToken),
+    searchMetaAdLocations(accessToken, input.locationName),
+  ]);
+  const page = pages.find((candidate) => candidate.id === input.pageId);
+  if (!page) throw new ValidationError('La Página de Facebook seleccionada ya no está administrada por esta conexión.');
+  if (
+    input.instagramId &&
+    page.instagram_business_account?.id !== input.instagramId
+  ) {
+    throw new ValidationError('La cuenta de Instagram no pertenece a la Página de Facebook seleccionada.');
+  }
+  const location = locations.find(
+    (candidate) =>
+      candidate.key === input.locationKey &&
+      candidate.country_code?.toUpperCase() === input.countryCode.toUpperCase(),
+  );
+  if (!location) {
+    throw new ValidationError('La ciudad seleccionada no coincide con la jurisdicción devuelta por Meta.');
   }
 }
 
@@ -415,7 +452,9 @@ export async function saveMetaConnections(input: Awaited<ReturnType<typeof excha
       nombre_cuenta: account.name,
       meta_currency: account.currency,
       estado: 'conectada',
-      permisos: { scopes: ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads'] },
+      permisos: {
+        scopes: ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads', 'instagram_basic'],
+      },
       access_token_enc: input.encryptedToken,
       token_expira_en: input.expiresAt,
       actualizado_en: new Date().toISOString(),

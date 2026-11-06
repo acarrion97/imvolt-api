@@ -56,6 +56,8 @@ export const campaignResource = new BaseResource<any, CampaignView>((row) => ({
   target_location_country_code: row.target_location_country_code ?? null,
   privacy_policy_url: row.privacy_policy_url ?? null,
   media_type: row.media_type ?? null,
+  meta_instagram_id: row.meta_instagram_id ?? null,
+  duration_days: row.duracion_dias == null ? null : Number(row.duracion_dias),
   meta_campaign_id: row.meta_campaign_id ?? null,
   created_at: new Date(row.creado_en).toISOString(),
   updated_at: new Date(row.actualizado_en).toISOString(),

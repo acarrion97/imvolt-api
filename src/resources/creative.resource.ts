@@ -12,7 +12,19 @@ import { PlantillaView } from '../models/creative/plantilla.model';
 import { TipoPlantilla } from '../models/creative/tipo_plantilla.model';
 import { ModeloIaView } from '../models/creative/modelo_ia.model';
 import { GeneracionView } from '../models/creative/generacion.model';
+import { GenerationOutputView } from '../models/creative/generation_output.model';
 import { propiedadResource } from './property.resource';
+
+export const generationOutputResource = new BaseResource<any, GenerationOutputView>((row) => ({
+  output_id: String(row.generation_output_id),
+  generation_id: String(row.generation_id),
+  output_index: Number(row.output_index),
+  media_type: row.media_type,
+  url: row.output_url,
+  mime_type: row.mime_type ?? null,
+  metadata: row.metadata ?? {},
+  created_at: new Date(row.created_at).toISOString(),
+}));
 
 export const modeloResource = new BaseResource<any, ModeloIaView>((row) => ({
   model_id: String(row.modelo_id),

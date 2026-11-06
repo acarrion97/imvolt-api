@@ -55,6 +55,16 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
 
   const userId = data.user!.id;
 
+  const { data: planPredeterminado, error: planError } = await supabase
+    .from('planes')
+    .select('plan_id')
+    .eq('nombre', 'Esencial')
+    .eq('estado', 'activo')
+    .maybeSingle();
+  if (planError) {
+    throw new HttpError(500, `No se pudo resolver el plan predeterminado: ${planError.message}`);
+  }
+
   // 1) Empresa (tenant)
   const { data: empresa, error: empresaError } = await supabase
     .from('empresas')
@@ -62,6 +72,7 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
       {
         razon_social: input.organization_name,
         ruc: input.ruc ?? null,
+        plan_id: (planPredeterminado as { plan_id: number } | null)?.plan_id ?? null,
         estado: 'activo',
       },
     ])

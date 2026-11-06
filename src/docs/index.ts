@@ -429,8 +429,76 @@ export const openapiCrudPaths: Record<string, any> = crudModules.reduce<Record<s
   {}
 );
 
-/** Operaciones de billing que no son CRUD de un recurso individual. */
+/** Operaciones de negocio que no son CRUD de un recurso individual. */
 export const openapiExtraPaths: Record<string, any> = {
+  '/api/v1/creative/generations/{id}/outputs': {
+    get: {
+      tags: ['Creative'],
+      summary: 'Lista los resultados persistidos de una generación',
+      description: 'Solo la organización propietaria del job puede consultar sus resultados.',
+      parameters: [{
+        name: 'id',
+        in: 'path',
+        required: true,
+        schema: { type: 'integer', example: 19 },
+      }],
+      responses: {
+        200: {
+          description: 'Resultados de la generación, en orden de salida',
+          content: {
+            'application/json': {
+              schema: { type: 'array', items: { $ref: '#/components/schemas/GenerationOutput' } },
+            },
+          },
+        },
+        401: { $ref: '#/components/responses/Unauthorized' },
+        404: { $ref: '#/components/responses/NotFound' },
+      },
+    },
+  },
+  '/api/v1/creative/generations/quote': {
+    post: {
+      tags: ['Creative'],
+      summary: 'Cotiza una generación antes de aceptarla',
+      description: 'Calcula el costo desde el catálogo activo y consulta el saldo disponible de la empresa.',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['model_id'],
+              properties: {
+                model_id: { type: 'string', example: '1' },
+                parametros: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        200: {
+          description: 'Cotización de créditos',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['model_id', 'credits_cost', 'available_credits', 'sufficient_credits'],
+                properties: {
+                  model_id: { type: 'string' },
+                  credits_cost: { type: 'integer' },
+                  available_credits: { type: 'integer' },
+                  sufficient_credits: { type: 'boolean' },
+                },
+              },
+            },
+          },
+        },
+        401: { $ref: '#/components/responses/Unauthorized' },
+        404: { $ref: '#/components/responses/NotFound' },
+      },
+    },
+  },
   '/api/v1/billing/wallet': {
     get: {
       tags: ['Créditos'],
