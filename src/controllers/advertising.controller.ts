@@ -709,7 +709,7 @@ export const { router: campaignRouter } = createCrudRouter({
 // ── Publicación en Meta ─────────────────────────────────────────────────────
 
 /** Prefer the selected OAuth connection; retain the legacy config as a migration fallback. */
-async function credencialesMeta(
+export async function credencialesMeta(
   empresaId: string,
   conexionId?: number | null,
 ): Promise<MetaCredentials | null> {

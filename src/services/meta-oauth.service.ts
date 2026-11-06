@@ -209,12 +209,20 @@ export async function exchangeMetaSdkToken(
     throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
   }
   const scopes = new Set(debug.scopes ?? []);
-  const missingScopes = ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads', 'instagram_basic']
+  const missingScopes = [
+    'ads_management',
+    'ads_read',
+    'pages_show_list',
+    'pages_manage_ads',
+    'instagram_basic',
+    'leads_retrieval',
+    'pages_manage_metadata',
+  ]
     .filter((scope) => !scopes.has(scope));
   if (missingScopes.length) {
     throw new HttpError(
       403,
-      'La autorización necesita ads_management, ads_read, pages_show_list, pages_manage_ads e instagram_basic. Actualiza Facebook Login for Business y vuelve a conectar Meta.',
+      'La autorización necesita permisos publicitarios, pages_show_list, leads_retrieval y pages_manage_metadata. Actualiza Facebook Login for Business y vuelve a conectar Meta.',
     );
   }
 
@@ -453,7 +461,15 @@ export async function saveMetaConnections(input: Awaited<ReturnType<typeof excha
       meta_currency: account.currency,
       estado: 'conectada',
       permisos: {
-        scopes: ['ads_management', 'ads_read', 'pages_show_list', 'pages_manage_ads', 'instagram_basic'],
+        scopes: [
+          'ads_management',
+          'ads_read',
+          'pages_show_list',
+          'pages_manage_ads',
+          'instagram_basic',
+          'leads_retrieval',
+          'pages_manage_metadata',
+        ],
       },
       access_token_enc: input.encryptedToken,
       token_expira_en: input.expiresAt,

@@ -56,6 +56,7 @@ import { billingRouter } from './routes/billing.route';
 import { platformAdminRouter } from './controllers/platform-admin.controller';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { lotesAlMandoRouter } from './routes/lotes-almando.route';
+import { metaWebhookRouter } from './controllers/meta-webhook.controller';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
@@ -75,6 +76,7 @@ app.use(requireHttps);
 app.use(securityHeaders);
 app.use(corsPolicy);
 app.use('/api', noStore);
+app.use('/api/webhooks/meta', express.raw({ type: 'application/json', limit: '1mb' }), metaWebhookRouter);
 
 // ── Middleware global ────────────────────────────────────────────────────────
 // 1 MB para JSON: las subidas de archivos van por multipart (multer, con sus límites).

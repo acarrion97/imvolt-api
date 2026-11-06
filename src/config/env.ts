@@ -136,6 +136,11 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('INTEGRATION_CREDENTIALS_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
   }
 
+  const metaWebhookToken = get('META_WEBHOOK_VERIFY_TOKEN');
+  if (metaWebhookToken && metaWebhookToken.length < 32) {
+    errors.push('META_WEBHOOK_VERIFY_TOKEN debe tener al menos 32 caracteres aleatorios.');
+  }
+
   return { errors, warnings };
 }
 
