@@ -55,6 +55,7 @@ import { contactoRouter, leadRouter } from './routes/leads.route';
 import { billingRouter } from './routes/billing.route';
 import { platformAdminRouter } from './controllers/platform-admin.controller';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
+import { lotesAlMandoRouter } from './routes/lotes-almando.route';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
@@ -107,6 +108,7 @@ app.use('/api/v1/integraciones', integracionRouter);
 app.use('/api/v1/configuraciones-integraciones', configuracionIntegracionRouter);
 app.use('/api/v1/empresas-integraciones', empresaIntegracionRouter);
 app.use('/api/v1/auditoria', auditLogRouter);
+app.use('/api/v1/integraciones/lotes-al-mando', lotesAlMandoRouter);
 
 // catalog (proyectos + media assets en bucket privado)
 app.use('/api/v1/proyectos', proyectoRouter);

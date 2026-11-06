@@ -42,6 +42,7 @@ las tablas padre siempre aparecen antes que las hijas.
 | Semillas | 0030 – 0035 |
 | Tenancy y datos (2026-10-26/27) | `20261026_add_propiedades_proyecto_fk`, `2026-10-26_tenant_hardening`, `2026-10-27_01` – `_05` |
 | Ledger, generaciones y publicidad | `2026-11-06_01_credit_ledger_atomic`, `2026-11-06_02_creative_module`, `2026-11-06_03_advertising_approval_idempotency` |
+| Integración Lotes al Mando | `2026-11-06_04_seed_lotes_al_mando_integration`, `2026-11-06_05_lotes_al_mando_sync`, `2026-11-06_06_integration_secrets_text` |
 | Publicación en Meta | `2026-10-27_meta_campaign_publish` |
 
 ## Idempotencia
@@ -93,6 +94,13 @@ historial de aprobación de campañas, la cuenta de Instagram asociada al anunci
 y la clave idempotente usada para reservar su publicación en Meta. Debe
 ejecutarse antes de desplegar la API que expone las acciones de aprobación y
 publicación protegida.
+
+La migración `2026-11-06_04_seed_lotes_al_mando_integration.sql` registra el
+proveedor en el catálogo. La migración `2026-11-06_05_lotes_al_mando_sync.sql`
+crea el mapeo único por tenant y las funciones de importación usadas por
+`POST /api/v1/integraciones/lotes-al-mando/sync`. La migración
+`2026-11-06_06_integration_secrets_text.sql` amplía `app_secret` para almacenar
+el texto cifrado, que puede superar los 200 caracteres originales.
 
 La migración `2026-10-27_04_campaign_tenant_backfill` solo rellena datos
 (`empresa_id` de campañas existentes) y no deja rastro verificable por esquema:
