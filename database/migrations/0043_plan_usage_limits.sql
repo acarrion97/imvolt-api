@@ -26,24 +26,27 @@ comment on column public.planes.limite_campanias_meta is 'Máximo de campañas M
 
 -- Backfill desde el texto de `caracteristicas` ("10 proyectos",
 -- "120 imágenes IA", "3 videos IA de 10 s", "20 campañas Meta").
-update public.planes
-set limite_proyectos = coalesce(
-        limite_proyectos,
-        (regexp_match(caracteristicas::text, '"\s*(\d+)\s*proyectos?\b', 'i'))[1]::integer
-    ),
-    limite_imagenes_ia = coalesce(
-        limite_imagenes_ia,
-        (regexp_match(caracteristicas::text, '"\s*(\d+)\s*im[aá]genes\b', 'i'))[1]::integer
-    ),
-    limite_videos_ia = coalesce(
-        limite_videos_ia,
-        (regexp_match(caracteristicas::text, '"\s*(\d+)\s*videos\b', 'i'))[1]::integer
-    ),
-    limite_campanias_meta = coalesce(
-        limite_campanias_meta,
-        (regexp_match(caracteristicas::text, '"\s*(\d+)\s*campa[nñ]as\b', 'i'))[1]::integer
-    )
-where caracteristicas is not null;
+-- Se recorre CADA beneficio con jsonb_array_elements_text y se ancla el
+-- patrón al inicio: parsear el array serializado depende de las comillas de
+-- la representación y no matcheaba "1 video IA" con `videos\b`.
+update public.planes as p
+set limite_proyectos = coalesce(p.limite_proyectos, (
+        select max((regexp_match(b, '^([0-9]+)[[:space:]]*proyectos?', 'i'))[1]::integer)
+        from jsonb_array_elements_text(p.caracteristicas) as b
+    )),
+    limite_imagenes_ia = coalesce(p.limite_imagenes_ia, (
+        select max((regexp_match(b, '^([0-9]+)[[:space:]]*im[aá]genes', 'i'))[1]::integer)
+        from jsonb_array_elements_text(p.caracteristicas) as b
+    )),
+    limite_videos_ia = coalesce(p.limite_videos_ia, (
+        select max((regexp_match(b, '^([0-9]+)[[:space:]]*videos?', 'i'))[1]::integer)
+        from jsonb_array_elements_text(p.caracteristicas) as b
+    )),
+    limite_campanias_meta = coalesce(p.limite_campanias_meta, (
+        select max((regexp_match(b, '^([0-9]+)[[:space:]]*campa[nñ]as', 'i'))[1]::integer)
+        from jsonb_array_elements_text(p.caracteristicas) as b
+    ))
+where p.caracteristicas is not null;
 
 -- Toda empresa debe tener plan asignado: los límites se resuelven desde él.
 -- Las creadas antes de que existiera el lookup correcto en el registro pueden

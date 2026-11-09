@@ -162,7 +162,7 @@ El panel `/administracion` requiere ese mismo correo de superadministrador.
 Sus endpoints `/api/v1/admin/planes`, `/api/v1/admin/empresas` y
 `/api/v1/admin/configuraciones` están protegidos en el servidor; la consulta
 global de empresas no modifica las rutas tenant-scoped ya existentes. Antes de
-desplegar, ejecuta las migraciones `0037`–`0043` en orden. Los planes se
+desplegar, ejecuta las migraciones `0037`–`0044` en orden. Los planes se
 desactivan en vez de borrarse y las empresas nuevas reciben el plan `AGENT`
 (el activo más barato, si no existe). Suspender una empresa bloquea sus
 llamadas al API; el superadministrador conserva acceso al panel para poder
