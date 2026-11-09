@@ -54,6 +54,8 @@ import { campaignRouter, campaniaPublicitariaRouter, conexionRouter, objetivoPub
 import { contactoRouter, leadRouter } from './routes/leads.route';
 import { platformAdminRouter } from './controllers/platform-admin.controller';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
+import { lotesAlMandoRouter } from './routes/lotes-almando.route';
+import { metaWebhookRouter } from './controllers/meta-webhook.controller';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
@@ -73,6 +75,7 @@ app.use(requireHttps);
 app.use(securityHeaders);
 app.use(corsPolicy);
 app.use('/api', noStore);
+app.use('/api/webhooks/meta', express.raw({ type: 'application/json', limit: '1mb' }), metaWebhookRouter);
 
 // ── Middleware global ────────────────────────────────────────────────────────
 // 1 MB para JSON: las subidas de archivos van por multipart (multer, con sus límites).
@@ -106,6 +109,7 @@ app.use('/api/v1/integraciones', integracionRouter);
 app.use('/api/v1/configuraciones-integraciones', configuracionIntegracionRouter);
 app.use('/api/v1/empresas-integraciones', empresaIntegracionRouter);
 app.use('/api/v1/auditoria', auditLogRouter);
+app.use('/api/v1/integraciones/lotes-al-mando', lotesAlMandoRouter);
 
 // catalog (proyectos + media assets en bucket privado)
 app.use('/api/v1/proyectos', proyectoRouter);

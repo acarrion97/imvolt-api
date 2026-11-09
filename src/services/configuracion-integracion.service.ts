@@ -1,5 +1,6 @@
 import { BaseService } from '../core';
 import { AuditContext } from './audit.service';
+import { encryptIntegrationSecret } from './integration-credentials.crypto';
 
 const CAMPOS_SECRETOS = new Set(['api_key', 'app_secret', 'access_token']);
 
@@ -19,6 +20,28 @@ function ocultarCredenciales(value: unknown): unknown {
 export class ConfiguracionIntegracionService extends BaseService {
   constructor() {
     super('configuraciones_integraciones', 'configuracion_integracion_id');
+  }
+
+  override create<U = unknown>(payload: Partial<U>, audit?: AuditContext): Promise<U> {
+    return super.create(this.cifrarSecreto(payload), audit);
+  }
+
+  override update<U = unknown>(
+    id: string | number,
+    payload: Partial<U>,
+    audit?: AuditContext,
+  ): Promise<U> {
+    return super.update(id, this.cifrarSecreto(payload), audit);
+  }
+
+  private cifrarSecreto<U>(payload: Partial<U>): Partial<U> {
+    if (!payload || typeof payload !== 'object') return payload;
+    const values = payload as Record<string, unknown>;
+    if (typeof values.app_secret !== 'string' || !values.app_secret) return payload;
+
+    return Object.assign({}, payload, {
+      app_secret: encryptIntegrationSecret(values.app_secret),
+    });
   }
 
   protected override async auditar(

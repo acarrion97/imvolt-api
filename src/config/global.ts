@@ -22,8 +22,11 @@ export const {
   META_APP_ID = '',
   META_APP_SECRET = '',
   META_TOKEN_ENCRYPTION_KEY = '',
+  META_WEBHOOK_VERIFY_TOKEN = '',
+  INTEGRATION_CREDENTIALS_ENCRYPTION_KEY = '',
   PUBLIC_FRONTEND_URL = '',
   META_GRAPH_API_VERSION = '',
+  LOTES_ALMANDO_API_URL = '',
 } = process.env;
 
 const asBool = (value: string, fallback: boolean): boolean =>
@@ -57,6 +60,7 @@ export const config = {
   enableDocs: asBool(ENABLE_DOCS, !production),
   /** Correos con permiso de escribir en los catálogos GLOBALES (roles, permisos, formatos…). */
   platformAdmins: asList(PLATFORM_ADMIN_EMAILS).map((email) => email.toLowerCase()),
+  lotesAlmandoURL: LOTES_ALMANDO_API_URL,
   rateLimit: {
     windowMs: asPositiveInt(AUTH_RATE_LIMIT_WINDOW_MINUTES, 15) * 60 * 1000,
     loginMax: asPositiveInt(AUTH_RATE_LIMIT_LOGIN_MAX, 10),
@@ -72,6 +76,8 @@ export const config = {
       ? `${PUBLIC_API_URL.replace(/\/$/, '')}/api/v1/conexiones/meta/oauth/callback`
       : '',
   },
+  metaWebhookVerifyToken: META_WEBHOOK_VERIFY_TOKEN.trim(),
+  integrationCredentialsEncryptionKey: INTEGRATION_CREDENTIALS_ENCRYPTION_KEY.trim(),
   db: {
     url: SUPABASE_URL,
     serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,

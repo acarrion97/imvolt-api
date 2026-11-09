@@ -421,6 +421,7 @@ En Render configura estas variables (no las pongas en Vercel ni en variables
 | `META_APP_ID` | ID público de la app creada en Meta for Developers |
 | `META_APP_SECRET` | App Secret de Meta; solo servidor |
 | `META_TOKEN_ENCRYPTION_KEY` | Clave aleatoria de 32 bytes en hexadecimal (64 caracteres) |
+| `INTEGRATION_CREDENTIALS_ENCRYPTION_KEY` | Clave aleatoria de 32 bytes en hexadecimal; cifra los `app_secret` guardados por empresa |
 | `PUBLIC_API_URL` | `https://imvolt-api.onrender.com` |
 | `PUBLIC_FRONTEND_URL` | `https://imvolt.vercel.app` |
 | `ALLOWED_ORIGIN` | `https://imvolt.vercel.app` |
@@ -430,6 +431,13 @@ Genera `META_TOKEN_ENCRYPTION_KEY` con
 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 Guárdala de forma permanente y segura: cambiarla sin volver a conectar las
 cuentas invalida los tokens ya cifrados.
+
+Genera `INTEGRATION_CREDENTIALS_ENCRYPTION_KEY` con el mismo comando. Debe
+configurarse solo en el backend antes de crear o actualizar credenciales de
+integración. Los `app_secret` se guardan con AES-256-GCM y se descifran solo
+en el backend que los consume; las credenciales anteriores en texto plano se
+cifran automáticamente al usarse. Conserva la clave: cambiarla impide
+descifrar los secretos ya guardados.
 
 `META_APP_ID` es el identificador público. Configúralo en el `.env` del
 frontend y como variable de build en Vercel. En el panel Business Login de Meta
@@ -539,11 +547,35 @@ backend invoque al proveedor. La API enmascara los campos secretos en las
 respuestas y los sustituye por una máscara en la bitácora. Mantén RLS
 habilitado y no entregues la service role key al cliente.
 
+### Configurar Lotes al Mando
+
+Antes del despliegue, ejecuta `database/migrations/2026-11-06_04_seed_lotes_al_mando_integration.sql`
+y `database/migrations/2026-11-06_06_integration_secrets_text.sql`. Configura
+`INTEGRATION_CREDENTIALS_ENCRYPTION_KEY` en el backend. Después, desde
+Configuración → Integraciones de la empresa, guarda las credenciales de acceso
+de esa organización. El API consulta la configuración activa vinculada a la
+empresa; no usa credenciales de entorno, sesión Express ni tokens enviados por
+el frontend.
+
+El formulario guarda el correo en `api_key` y la contraseña en `app_secret`.
+Ambos campos se enmascaran en respuestas y auditoría. El servicio inicia sesión
+con `POST /api/auth/login` y consulta proyectos/lotes en `/api/v1`, enviando el
+token como `Authorization: Bearer`. Solo se admite el endpoint HTTPS oficial.
+Esta integración no tiene sandbox; debe configurarse como producción.
+
+Ejecuta también `database/migrations/2026-11-06_05_lotes_al_mando_sync.sql`
+para crear los mapeos idempotentes y las funciones de persistencia protegidas
+por `service_role`. `POST /api/v1/integraciones/lotes-al-mando/sync` importa o
+actualiza proyectos y lotes como propiedades de la empresa. Los lotes sin
+precio positivo o sin una relación válida proyecto → etapa → manzana se omiten.
+La operación no elimina registros si dejan de aparecer en el origen.
+
 Campos usados por proveedor:
 
 | Proveedor | `url_base` | `api_key` | `api_id` | `app_secret` | `access_token` |
 |-----------|------------|-----------|----------|--------------|----------------|
 | Higgsfield | `https://api.higgsfield.ai` | API Key ID | — | API Key Secret | — |
+| Lotes al Mando | `https://lotes-al-mando-api.onrender.com` | Correo de acceso | — | Contraseña | — |
 | Meta Ads | OAuth del servidor | — | — | — | Cifrado en `conexiones` |
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` y, en producción,

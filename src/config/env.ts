@@ -131,6 +131,16 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('META_GRAPH_API_VERSION debe tener el formato vNN.N (por ejemplo, v24.0).');
   }
 
+  const integrationCredentialsKey = get('INTEGRATION_CREDENTIALS_ENCRYPTION_KEY');
+  if (integrationCredentialsKey && !/^[\da-fA-F]{64}$/.test(integrationCredentialsKey)) {
+    errors.push('INTEGRATION_CREDENTIALS_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
+  }
+
+  const metaWebhookToken = get('META_WEBHOOK_VERIFY_TOKEN');
+  if (metaWebhookToken && metaWebhookToken.length < 32) {
+    errors.push('META_WEBHOOK_VERIFY_TOKEN debe tener al menos 32 caracteres aleatorios.');
+  }
+
   return { errors, warnings };
 }
 
