@@ -541,37 +541,14 @@ Manager. Antes de desplegar la API, ejecuta
 
 ### Configurar Higgsfield
 
-Para Higgsfield, crea la configuración de credenciales en
-`POST /api/v1/configuraciones-integraciones` y vincúlala a la empresa y al
-proveedor en `POST /api/v1/empresas-integraciones`. Ambos endpoints requieren
-sesión y permiso `gestionar_integraciones`.
-
-Consulta los IDs disponibles con:
-
-```sql
-select integracion_id, nombre
-from public.integraciones
-where nombre in ('Higgsfield', 'Meta Ads');
-```
-
-La configuración de Higgsfield requiere primero una configuración (el
-`empresa_id` se toma de la sesión):
-
-```json
-{
-  "url_base": "https://api.higgsfield.ai",
-  "api_key": "<API Key ID>",
-  "entorno": "produccion",
-  "app_secret": "<API Key Secret>"
-}
-```
-
-Luego crea el vínculo en `empresas_integraciones` con el `integracion_id`
-correspondiente y el `configuracion_integracion_id` recién creado. Las
-conexiones con `entorno: "sandbox"` se simulan; usa `"produccion"` para que el
-backend invoque al proveedor. La API enmascara los campos secretos en las
-respuestas y los sustituye por una máscara en la bitácora. Mantén RLS
-habilitado y no entregues la service role key al cliente.
+Las credenciales se administran por empresa desde Administración → Empresas →
+Administrar → Credenciales de Higgsfield. Las rutas
+`GET /api/v1/admin/empresas/:id/higgsfield` y
+`PUT /api/v1/admin/empresas/:id/higgsfield` requieren una sesión de un
+superadministrador de la plataforma. El API solo devuelve indicadores de
+credenciales configuradas, nunca sus valores; al actualizar, los campos
+secretos vacíos conservan los valores existentes. Las conexiones `sandbox` se
+simulan; usa `produccion` para invocar al proveedor.
 
 ### Configurar Lotes al Mando
 

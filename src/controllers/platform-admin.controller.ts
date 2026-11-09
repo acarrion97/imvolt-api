@@ -1,12 +1,13 @@
 import { Request, Response, Router } from 'express';
 import Joi from 'joi';
-import { BaseService, auditContext, createCrudRouter, errorResponse, ValidationError } from '../core';
+import { BaseService, auditContext, createCrudRouter, errorResponse, NotFoundError, ValidationError } from '../core';
 import supabase from '../config/supabaseClient';
 import { requireOrg } from '../middlewares/sessionAuth';
 import { writeByPlatformAdmin } from '../middlewares/requireRole';
 import { ConfiguracionSistema } from '../models/platform-admin/configuracion-sistema.model';
 import { Plan } from '../models/platform-admin/plan.model';
 import { configuracionSistemaRequest, planRequest } from '../requests/platform-admin.request';
+import { ConfiguracionIntegracionService } from '../services/configuracion-integracion.service';
 
 const planService = new BaseService<Plan>('planes', 'plan_id');
 const configuracionService = new BaseService<ConfiguracionSistema>(
@@ -14,6 +15,13 @@ const configuracionService = new BaseService<ConfiguracionSistema>(
   'configuracion_sistema_id',
 );
 const empresaService = new BaseService('empresas', 'empresa_id');
+const configuracionIntegracionService = new ConfiguracionIntegracionService();
+const empresaIntegracionService = new BaseService('empresas_integraciones', 'empresa_integracion_id');
+const higgsfieldInputSchema = Joi.object({
+  entorno: Joi.string().valid('sandbox', 'produccion').required(),
+  api_key: Joi.string().trim().max(200).allow(''),
+  app_secret: Joi.string().trim().max(200).allow(''),
+}).unknown(false);
 
 const planesRouter = createCrudRouter<Plan>({
   table: 'planes',
@@ -151,6 +159,197 @@ platformAdminRouter.patch('/empresas/:id', async (req: Request, res: Response) =
       { ...auditContext(req), empresaId: id },
     );
     res.json(empresa);
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+});
+
+platformAdminRouter.get('/empresas/:id/higgsfield', async (req: Request, res: Response) => {
+  try {
+    const empresaId = Number(req.params.id);
+    if (!Number.isInteger(empresaId) || empresaId < 1) {
+      throw new ValidationError('Identificador de empresa inválido');
+    }
+
+    const { data: empresa, error: empresaError } = await supabase
+      .from('empresas')
+      .select('empresa_id')
+      .eq('empresa_id', empresaId)
+      .maybeSingle();
+    if (empresaError) throw new Error(empresaError.message);
+    if (!empresa) throw new NotFoundError(`Empresa con id ${empresaId}`);
+
+    const { data: integracion, error: integracionError } = await supabase
+      .from('integraciones')
+      .select('integracion_id')
+      .eq('nombre', 'Higgsfield')
+      .maybeSingle();
+    if (integracionError) throw new Error(integracionError.message);
+    if (!integracion) throw new NotFoundError('Integración Higgsfield');
+
+    const { data: relacion, error: relacionError } = await supabase
+      .from('empresas_integraciones')
+      .select('empresa_integracion_id, estado, configuracion_integracion_id')
+      .eq('empresa_id', empresaId)
+      .eq('integracion_id', integracion.integracion_id)
+      .maybeSingle();
+    if (relacionError) throw new Error(relacionError.message);
+
+    const { data: configuracion, error: configuracionError } = relacion
+      ? await supabase
+          .from('configuraciones_integraciones')
+          .select('configuracion_integracion_id, entorno, api_key, app_secret')
+          .eq('configuracion_integracion_id', relacion.configuracion_integracion_id)
+          .maybeSingle()
+      : { data: null, error: null };
+    if (configuracionError) throw new Error(configuracionError.message);
+    res.json({
+      configurado: Boolean(relacion && configuracion && relacion.estado === 'activo'),
+      entorno: configuracion?.entorno === 'produccion' ? 'produccion' : 'sandbox',
+      api_key_configurada: Boolean(configuracion?.api_key),
+      app_secret_configurado: Boolean(configuracion?.app_secret),
+    });
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+});
+
+platformAdminRouter.put('/empresas/:id/higgsfield', async (req: Request, res: Response) => {
+  try {
+    const empresaId = Number(req.params.id);
+    if (!Number.isInteger(empresaId) || empresaId < 1) {
+      throw new ValidationError('Identificador de empresa inválido');
+    }
+
+    const { error: validationError, value } = higgsfieldInputSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: false,
+    });
+    if (validationError) {
+      throw new ValidationError(
+        'Datos de entrada inválidos',
+        validationError.details.map((detail) => ({
+          field: detail.path.join('.'),
+          message: detail.message,
+        })),
+      );
+    }
+
+    const { data: empresa, error: empresaError } = await supabase
+      .from('empresas')
+      .select('empresa_id')
+      .eq('empresa_id', empresaId)
+      .maybeSingle();
+    if (empresaError) throw new Error(empresaError.message);
+    if (!empresa) throw new NotFoundError(`Empresa con id ${empresaId}`);
+
+    const { data: integracion, error: integracionError } = await supabase
+      .from('integraciones')
+      .select('integracion_id')
+      .eq('nombre', 'Higgsfield')
+      .maybeSingle();
+    if (integracionError) throw new Error(integracionError.message);
+    if (!integracion) throw new NotFoundError('Integración Higgsfield');
+
+    const { data: relacion, error: relacionError } = await supabase
+      .from('empresas_integraciones')
+      .select('empresa_integracion_id, estado, configuracion_integracion_id')
+      .eq('empresa_id', empresaId)
+      .eq('integracion_id', integracion.integracion_id)
+      .maybeSingle();
+    if (relacionError) throw new Error(relacionError.message);
+
+    const { data: configuracionExistente, error: configuracionError } = relacion
+      ? await supabase
+          .from('configuraciones_integraciones')
+          .select('configuracion_integracion_id, empresa_id, api_key, app_secret')
+          .eq('configuracion_integracion_id', relacion.configuracion_integracion_id)
+          .maybeSingle()
+      : { data: null, error: null };
+    if (configuracionError) throw new Error(configuracionError.message);
+    if (
+      configuracionExistente?.empresa_id != null &&
+      Number(configuracionExistente.empresa_id) !== empresaId
+    ) {
+      throw new ValidationError('La configuración de Higgsfield no pertenece a esta empresa.');
+    }
+    const apiKey = value.api_key || configuracionExistente?.api_key;
+    const appSecret = value.app_secret || configuracionExistente?.app_secret;
+    if (!apiKey || !appSecret) {
+      throw new ValidationError('Completa ambas credenciales de Higgsfield para esta empresa.', [
+        { field: !apiKey ? 'api_key' : 'app_secret', message: 'Este campo es obligatorio.' },
+      ]);
+    }
+
+    const audit = { ...auditContext(req), empresaId };
+    const payload = {
+      url_base: 'https://api.higgsfield.ai',
+      entorno: value.entorno as 'sandbox' | 'produccion',
+      ...(value.api_key ? { api_key: value.api_key } : {}),
+      ...(value.app_secret ? { app_secret: value.app_secret } : {}),
+      ...(configuracionExistente ? {} : { api_key: apiKey, app_secret: appSecret }),
+    };
+
+    let configuracionId = configuracionExistente?.configuracion_integracion_id;
+    if (configuracionId) {
+      await configuracionIntegracionService.update(configuracionId, payload, audit);
+    } else {
+      const nuevaConfiguracion = await configuracionIntegracionService.create<{
+        configuracion_integracion_id: number;
+        empresa_id: number;
+        url_base: string;
+        entorno: 'sandbox' | 'produccion';
+        api_key: string;
+        app_secret: string;
+      }>({ ...payload, empresa_id: empresaId }, audit);
+      configuracionId = nuevaConfiguracion.configuracion_integracion_id;
+    }
+
+    if (relacion) {
+      await empresaIntegracionService.update(
+        relacion.empresa_integracion_id,
+        {
+          configuracion_integracion_id: configuracionId,
+          referencia_credencial: 'Higgsfield',
+          estado: 'activo',
+        },
+        audit,
+      );
+    } else {
+      try {
+        await empresaIntegracionService.create(
+          {
+            empresa_id: empresaId,
+            integracion_id: integracion.integracion_id,
+            configuracion_integracion_id: configuracionId,
+            referencia_credencial: 'Higgsfield',
+            estado: 'activo',
+          },
+          audit,
+        );
+      } catch (error) {
+        try {
+          await configuracionIntegracionService.remove(configuracionId);
+        } catch (cleanupError) {
+          throw new Error(
+            `${error instanceof Error ? error.message : 'No se pudo vincular Higgsfield.'} ` +
+              `También falló la limpieza de la configuración nueva: ${
+                cleanupError instanceof Error ? cleanupError.message : 'error desconocido'
+              }`,
+          );
+        }
+        throw error;
+      }
+    }
+
+    res.json({
+      configurado: true,
+      entorno: value.entorno,
+      api_key_configurada: true,
+      app_secret_configurado: true,
+    });
   } catch (error) {
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
