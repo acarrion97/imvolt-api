@@ -38,7 +38,7 @@ las tablas padre siempre aparecen antes que las hijas.
 | Leads | 0021 |
 | Brand Kit | 0022 – 0024 |
 | Auditoría | 0025 |
-| Cambios incrementales | 0026 – 0029, 0036 – 0042 |
+| Cambios incrementales | 0026 – 0029, 0036 – 0043 |
 | Semillas | 0030 – 0035 |
 | Tenancy y datos (2026-10-26/27) | `20261026_add_propiedades_proyecto_fk`, `2026-10-26_tenant_hardening`, `2026-10-27_01` – `_05` |
 | Ledger, generaciones y publicidad | `2026-11-06_01_credit_ledger_atomic`, `2026-11-06_02_creative_module`, `2026-11-06_03_advertising_approval_idempotency` |
@@ -79,14 +79,18 @@ publicado, entre ellas `brand_assets.siguiente_numero` (0036) y las de Meta
 > *"Could not find the 'meta_estado' column ... in the schema cache"* (PGRST204)
 > al pulsar **Enviar a meta**. Única migración pendiente que quedaba.
 
-Las migraciones **0037–0042** agregan el catálogo de planes, la asignación de
+Las migraciones **0037–0043** agregan el catálogo de planes, la asignación de
 plan a empresas, las configuraciones globales y los niveles comerciales AGENT,
 BUSINESS y PRIME. La migración 0041 retira los créditos mensuales del catálogo
 y su configuración predeterminada. El contenido adicional y los modelos
 premium se cotizan por generación en USD, antes de impuestos. La migración 0042
 registra el precio cotizado de las nuevas generaciones y completa los registros
-anteriores cuando el modelo tiene una tarifa configurada. Ejecútalas en ese
-orden antes de desplegar una versión de la API que exponga `/api/v1/admin`.
+anteriores cuando el modelo tiene una tarifa configurada. La migración 0043
+convierte los beneficios comerciales en **límites de uso numéricos**
+(`limite_proyectos`, `limite_imagenes_ia`, `limite_videos_ia`,
+`limite_campanias_meta`), los rellena desde el texto de `caracteristicas` y
+asigna plan a las empresas que quedaron sin él. Ejecútalas en ese orden antes
+de desplegar una versión de la API que exponga `/api/v1/admin`.
 
 La migración `2026-11-06_02_creative_module.sql` expone las vistas canónicas
 `templates`, `model_registry` y `generation_jobs` sobre las tablas históricas

@@ -55,11 +55,15 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
 
   const userId = data.user!.id;
 
+  // Plan predeterminado de las empresas nuevas. Sin plan asignado no hay
+  // límites de uso que aplicar (services/plan-limits.service.ts), así que se
+  // busca 'AGENT' (gama comercial 2026) y, si no existe, el activo más barato.
   const { data: planPredeterminado, error: planError } = await supabase
     .from('planes')
-    .select('plan_id')
-    .eq('nombre', 'Esencial')
+    .select('plan_id, nombre')
     .eq('estado', 'activo')
+    .order('precio_mensual', { ascending: true })
+    .limit(1)
     .maybeSingle();
   if (planError) {
     throw new HttpError(500, `No se pudo resolver el plan predeterminado: ${planError.message}`);

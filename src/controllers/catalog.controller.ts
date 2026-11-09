@@ -25,6 +25,7 @@ import { createCrudRouter } from '../core/crud.factory';
 import { HttpError, NotFoundError, ValidationError } from '../core/errors';
 import { writeByMarketing, writeByOwnerOrAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa } from '../middlewares/tenantScope';
+import { limitarPorPlan } from '../middlewares/planLimits';
 import { requireOrg } from '../middlewares/sessionAuth';
 import {
   MediaAsset,
@@ -380,7 +381,7 @@ export const { router: proyectoRouter } = createCrudRouter<Proyecto>({
   resource: proyectoResource,
   entityName: 'Proyecto',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, empresaEnEscritura],
+  writeMiddlewares: [writeByOwnerOrAdmin, empresaEnEscritura, limitarPorPlan('proyectos')],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
   tenantColumn: 'empresa_id',

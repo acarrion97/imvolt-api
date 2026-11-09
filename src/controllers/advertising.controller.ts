@@ -39,6 +39,7 @@ import {
 import { requireOrg } from '../middlewares/sessionAuth';
 import { manageIntegrations, requirePermission, writeByMarketing, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
+import { limitarPorPlan } from '../middlewares/planLimits';
 import { resolveField, translateBody, translateQuery } from '../middlewares/contract';
 
 // Catálogo GLOBAL de objetivos: escritura solo de la plataforma.
@@ -658,6 +659,7 @@ export const { router: campaignRouter } = createCrudRouter({
     requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id'),
     requireOwnedRef('conexion_id', 'conexiones', 'conexion_id'),
     requireEditableCampaign,
+    limitarPorPlan('campanias_meta'),
   ],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   tenantScoped: true,
@@ -1009,6 +1011,7 @@ export const { router: campaniaPublicitariaRouter } = createCrudRouter({
     writeByMarketing,
     requireEditableCampaign,
     requireOwnedRef('propiedad_id', 'propiedades', 'propiedad_id'),
+    limitarPorPlan('campanias_meta'),
   ],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   // Sin columna de empresa: el dueño es el de su propiedad.

@@ -44,6 +44,7 @@ import {
 } from '../resources/identity.resource';
 import { requireOrg } from '../middlewares/sessionAuth';
 import { filterByEmpresa, forceEmpresa, requireOwnedRef } from '../middlewares/tenantScope';
+import { limitarPorPlan } from '../middlewares/planLimits';
 import { manageIntegrations, manageUsers, writeByOwnerOrAdmin, writeByPlatformAdmin } from '../middlewares/requireRole';
 import { Rol } from '../models/identity/rol.model';
 import { UsuarioView } from '../models/identity/usuario.model';
@@ -175,14 +176,21 @@ export const { router: usuarioRouter } = createCrudRouter<UsuarioView>({
   resource: usuarioResource,
   entityName: 'Usuario',
   middlewares: [...requireOrg, filterByEmpresa],
-  writeMiddlewares: [writeByOwnerOrAdmin, manageUsers, forceEmpresa],
+  writeMiddlewares: [writeByOwnerOrAdmin, manageUsers, forceEmpresa, limitarPorPlan('usuarios')],
   defaultGetAllOptions: { orderBy: 'creado_en', ascending: false },
   // Sin esto GET/PATCH/DELETE /usuarios/:id operaban sobre usuarios de OTRAS empresas.
   tenantScoped: true,
   tenantColumn: 'empresa_id',
   handlers: { update: actualizarUsuario, remove: eliminarUsuario },
   extraRoutes: (router) => {
-    router.post('/invitaciones', ...requireOrg, writeByOwnerOrAdmin, manageUsers, invitarHandler);
+    router.post(
+      '/invitaciones',
+      ...requireOrg,
+      writeByOwnerOrAdmin,
+      manageUsers,
+      limitarPorPlan('usuarios'),
+      invitarHandler,
+    );
   },
 });
 

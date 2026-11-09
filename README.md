@@ -162,10 +162,11 @@ El panel `/administracion` requiere ese mismo correo de superadministrador.
 Sus endpoints `/api/v1/admin/planes`, `/api/v1/admin/empresas` y
 `/api/v1/admin/configuraciones` están protegidos en el servidor; la consulta
 global de empresas no modifica las rutas tenant-scoped ya existentes. Antes de
-desplegar, ejecuta las migraciones `0037`–`0039` en orden. Los planes se
-desactivan en vez de borrarse y las empresas nuevas reciben el plan `Esencial`.
-Suspender una empresa bloquea sus llamadas al API; el superadministrador
-conserva acceso al panel para poder reactivarla.
+desplegar, ejecuta las migraciones `0037`–`0043` en orden. Los planes se
+desactivan en vez de borrarse y las empresas nuevas reciben el plan `AGENT`
+(el activo más barato, si no existe). Suspender una empresa bloquea sus
+llamadas al API; el superadministrador conserva acceso al panel para poder
+reactivarla.
 
 ## Módulos y rutas
 
@@ -395,6 +396,31 @@ larga duración, consulta las cuentas publicitarias activas y guarda el token
 cifrado en `conexiones`. `meta_user_id` es únicamente el ID externo asignado por
 Meta, para atender sus solicitudes de eliminación de datos. El navegador nunca
 recibe el App Secret ni el token de Meta.
+
+### Límites de uso por plan
+
+Cada plan declara restricciones numéricas en `planes`: `limite_usuarios`,
+`limite_proyectos`, `limite_imagenes_ia`, `limite_videos_ia` y
+`limite_campanias_meta`. Un valor en `NULL` (o una empresa sin plan) no
+restringe ese recurso.
+
+`services/plan-limits.service.ts` cuenta el consumo actual de la empresa y
+responde **403** al alcanzar el máximo, antes de crear el registro:
+
+| Recurso | Se valida en | Conteo |
+|---------|--------------|--------|
+| Proyectos | `POST /api/v1/proyectos` | `proyectos` de la empresa |
+| Imágenes IA | `POST /api/v1/creative/generations` | `generaciones` cuyo modelo es `image` |
+| Videos IA | `POST /api/v1/creative/generations` | `generaciones` cuyo modelo es `video` |
+| Campañas Meta | `POST /api/v1/campaigns`, `POST /api/v1/campanias-publicitarias` | `campanias_publicitarias` de la empresa |
+| Miembros | `POST /api/v1/usuarios`, `POST /api/v1/usuarios/invitaciones` | `usuarios` activos de la empresa |
+
+El mensaje indica el plan, el máximo y el consumo (`Tu plan PRIME permite 10
+proyectos y ya tienes 10. Actualiza tu plan para continuar.`) y el frontend lo
+muestra tal cual. Los `PATCH` y `DELETE` no consumen cuota, así que no se
+restringen. Los beneficios visibles en la tabla de planes (`caracteristicas`)
+se generan en el servidor a partir de estos números: no se envían desde el
+cliente.
 
 ### Historial de créditos
 

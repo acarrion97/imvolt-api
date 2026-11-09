@@ -37,6 +37,7 @@ import {
 } from '../models/creative/generacion.model';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import { HiggsfieldCredentials, higgsfieldService } from '../services/higgsfield.service';
+import { exigirLimiteDePlan } from '../services/plan-limits.service';
 
 // Catálogos GLOBALES (tipos, plantillas, formatos, enfoques): sin columna de
 // empresa, compartidos por todos los tenants → escritura solo de la plataforma.
@@ -327,6 +328,13 @@ const generationCreate: RequestHandler = async (req, res) => {
         current_price_usd: priceUsd,
       });
     }
+
+    // Límite de uso del plan: imagen y video consumen cuotas distintas. Se
+    // comprueba DESPUÉS de resolver el modelo y ANTES de reservar el job.
+    await exigirLimiteDePlan(
+      req.organizationId,
+      model.tipo_media === 'video' ? 'videos_ia' : 'imagenes_ia',
+    );
     generation = await generationService.create<Generacion>({
       empresa_id: Number(req.organizationId),
       propiedad_id: payload.propiedad_id ?? null,
