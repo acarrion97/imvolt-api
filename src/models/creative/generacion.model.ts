@@ -9,7 +9,7 @@
 //   property_id         → propiedad_id
 //   template_id         → plantilla_id
 //   model_id            → modelo_id
-//   credits_cost        → creditos_costo (lo cotiza SIEMPRE el API)
+//   price_usd           → precio_usd (lo cotiza SIEMPRE el API)
 //   status              → estado  (created → … → completed/failed)
 //   provider_request_id → peticion_proveedor_id
 //   error_message       → error_mensaje
@@ -34,7 +34,7 @@ export const ESTADOS_FINALES: ReadonlySet<string> = new Set([
 
 const TRANSICIONES_PERMITIDAS: Record<GeneracionEstado, ReadonlySet<GeneracionEstado>> = {
   created: new Set(['quoted', 'failed', 'canceled']),
-  quoted: new Set(['credits_reserved', 'failed', 'canceled']),
+  quoted: new Set(['queued', 'failed', 'canceled']),
   credits_reserved: new Set(['queued', 'failed', 'canceled']),
   queued: new Set(['processing', 'completed', 'failed', 'canceled']),
   processing: new Set(['completed', 'failed', 'canceled']),
@@ -62,7 +62,7 @@ export interface Generacion {
   parametros: Record<string, unknown>;
   estado: GeneracionEstado;
   idempotency_key?: string | null;
-  creditos_costo: number;
+  precio_usd: number | null;
   peticion_proveedor_id: string | null;
   error_mensaje: string | null;
   creado_en: string;
@@ -80,7 +80,7 @@ export interface GeneracionView {
   prompt: string;
   parametros: Record<string, unknown>;
   status: GeneracionEstado;
-  credits_cost: number;
+  price_usd: number | null;
   provider_request_id: string | null;
   error_message: string | null;
   created_at: string;

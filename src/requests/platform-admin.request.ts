@@ -7,15 +7,14 @@ const planShape = {
   descripcion: Joi.string().allow('').max(300),
   precio_mensual: Joi.number().min(0).precision(2),
   limite_usuarios: Joi.number().integer().min(1),
-  creditos_mensuales: Joi.number().integer().min(0),
   caracteristicas: Joi.array().items(Joi.string().trim().min(1).max(100)).max(12),
   estado: estado(),
 };
 
 export const planRequest = new BaseRequest(
   buildSchemas(planShape, {
-    required: ['nombre', 'descripcion', 'precio_mensual', 'limite_usuarios', 'creditos_mensuales'],
-    defaults: { descripcion: '', precio_mensual: 0, limite_usuarios: 1, creditos_mensuales: 0, caracteristicas: [], estado: 'activo' },
+    required: ['nombre', 'descripcion', 'precio_mensual', 'limite_usuarios'],
+    defaults: { descripcion: '', precio_mensual: 0, limite_usuarios: 1, caracteristicas: [], estado: 'activo' },
   }),
 );
 

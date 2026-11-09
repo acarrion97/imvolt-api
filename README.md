@@ -28,7 +28,7 @@ Petición HTTP
 | Capa | Carpeta | Responsabilidad |
 |------|---------|-----------------|
 | Request | `src/requests/` | Valida con Joi y devuelve el payload limpio |
-| Service | `src/core/base.service.ts` + `src/services/` | CRUD genérico + lógica de negocio (Higgsfield, Meta, créditos, estratega) |
+| Service | `src/core/base.service.ts` + `src/services/` | CRUD genérico + lógica de negocio (Higgsfield, Meta, estratega) |
 | Resource | `src/resources/` | Forma exacta de la respuesta |
 | Controller | `src/controllers/` | Orquesta el flujo y maneja códigos HTTP |
 | Routes | `src/routes/` | Rutas + documentación Swagger |
@@ -355,24 +355,23 @@ Brand Kit:
 
 El catálogo se sirve en `GET /api/v1/modelos`; las generaciones se persisten en
 `generaciones` y se exponen en `GET/POST /api/v1/creative/generations`. El API
-calcula el costo desde el catálogo, valida propiedad/modelo y conserva el
-identificador de proveedor. `POST .../quote` devuelve el costo del modelo y el
-saldo disponible antes de aceptar la generación. Cada job avanza por
-`created → quoted → credits_reserved → queued → processing → completed/failed/canceled`:
+calcula el precio USD desde el catálogo, valida propiedad/modelo y conserva el
+identificador de proveedor. `POST .../quote` devuelve `model_id`, `price_usd`
+y `currency` antes de aceptar la generación. Los jobs nuevos avanzan por
+`created → quoted → queued → processing → completed/failed/canceled`:
 
 ```
-POST /api/v1/creative/generations/quote → cotiza desde el catálogo y comprueba el saldo
-POST /api/v1/creative/generations      → cotiza, reserva créditos y encola
+POST /api/v1/creative/generations/quote → cotiza en USD desde el catálogo
+POST /api/v1/creative/generations      → valida la cotización, registra el precio y encola
 GET  /api/v1/creative/generations/:id  → consulta/persiste el estado del proveedor
 ```
 
-El cliente debe enviar una `idempotency_key` al crear el job; una repetición con
-la misma clave y payload devuelve la generación original sin volver a reservar.
-La reserva descuenta el saldo disponible una sola vez; la confirmación registra
-el consumo sin un segundo descuento, y los fallos/cancelaciones devuelven la
-reserva. El ledger distingue `monto` (variación de saldo) de `creditos`
-(volumen del movimiento). Tanto en simulación como con un proveedor real, `GET`
-actualiza los estados posteriores a `queued`.
+El cliente debe enviar una `idempotency_key` y el `quoted_price_usd` vigente al
+crear el job; una repetición con la misma clave y payload devuelve la generación
+original sin volver a encolarla. El precio queda registrado en USD antes de
+impuestos. Tanto en simulación como con un proveedor real, `GET` actualiza los
+estados posteriores a `queued`. El estado legado `credits_reserved` puede
+aparecer en generaciones históricas, pero no forma parte del flujo nuevo.
 
 ### Contratos REST de campañas y leads
 
@@ -397,16 +396,12 @@ cifrado en `conexiones`. `meta_user_id` es únicamente el ID externo asignado po
 Meta, para atender sus solicitudes de eliminación de datos. El navegador nunca
 recibe el App Secret ni el token de Meta.
 
-### Créditos (§16)
+### Historial de créditos
 
-- `GET /api/v1/billing/wallet`, `GET /api/v1/billing/transactions` y
-  `POST /api/v1/billing/recharge` sirven el saldo y el ledger de la empresa.
-- La primera wallet recibe 25 créditos de bienvenida, con movimiento
-  idempotente. La recarga es un stub y no representa un cobro real.
-- Cada recarga requiere `idempotency_key`; reserva, confirmación y devolución
-  se aplican transaccionalmente en PostgreSQL. Reintentar una operación con la
-  misma clave y los mismos datos no modifica el saldo dos veces.
-- Los movimientos de transacciones son de solo lectura para el cliente.
+Los endpoints de wallet, transacciones y recargas se retiraron. Las migraciones
+y tablas existentes se conservan para no perder registros históricos; el flujo
+actual de generaciones cotiza y registra precios en USD y no consulta ni
+modifica el ledger.
 
 ## Proveedores en modo simulado
 
@@ -654,14 +649,13 @@ src/
 │   │                 meta (adaptador Meta)
 │   ├── leads/        contacto(+View)
 │   ├── brandkit/     brand_asset(+View), brand_asset_version, brand_color(+View)
-│   └── commerce/     credits (créditos, deshabilitado)
 ├── requests/        Validaciones Joi por dominio (helpers + dominio.*)
 ├── resources/       Vistas de respuesta por dominio
 ├── controllers/     Un controlador por módulo (createCrudRouter)
 ├── routes/          Exposición de routers (+ Swagger de auth, identidad,
 │                    Brand Kit y Catálogo)
 ├── services/        auth, audit, miembros (invitación + guardas de equipo),
-│                    higgsfield, meta, credits, strategist,
+│                    higgsfield, meta, strategist,
 │                    brandkit.storage y media.storage (buckets privados +
 │                    URL firmada)
 ├── types/           Extensiones de Express (userId, organizationId, orgRole, orgRoles, permissions)

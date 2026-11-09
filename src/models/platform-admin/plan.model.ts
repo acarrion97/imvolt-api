@@ -6,6 +6,5 @@ export interface Plan extends BaseModel<Plan> {
   descripcion: string;
   precio_mensual: number;
   limite_usuarios: number;
-  creditos_mensuales: number;
   caracteristicas: string[];
 }

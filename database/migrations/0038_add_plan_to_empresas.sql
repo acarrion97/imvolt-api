@@ -8,5 +8,5 @@ alter table public.empresas
 create index if not exists idx_empresas_plan on public.empresas (plan_id);
 
 update public.empresas
-set plan_id = (select plan_id from public.planes where nombre = 'Esencial')
+set plan_id = (select plan_id from public.planes where nombre = 'AGENT')
 where plan_id is null;

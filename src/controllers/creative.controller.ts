@@ -35,7 +35,6 @@ import {
   puedeTransicionarGeneracion,
   type GeneracionEstado,
 } from '../models/creative/generacion.model';
-import { creditsService } from '../services/credits.service';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import { HiggsfieldCredentials, higgsfieldService } from '../services/higgsfield.service';
 
@@ -210,7 +209,8 @@ async function higgsfieldCredentials(empresaId: string): Promise<HiggsfieldCrede
 function quoteGeneration(model: {
   tipo_media: string;
   modelo_proveedor_id: string;
-  creditos_cotizacion: number;
+  precio_usd: number | null;
+  precio_unidad: 'imagen' | 'segundo' | null;
   duracion_min_s: number | null;
   duracion_max_s: number | null;
   ratios: unknown;
@@ -235,9 +235,18 @@ function quoteGeneration(model: {
       { field: 'parametros.ratio', message: 'Selecciona una relación de aspecto disponible para este modelo.' },
     ]);
   }
-  return Number(model.creditos_cotizacion) + (
-    model.tipo_media === 'video' ? Math.max(0, Math.ceil(duration / 5) - 1) : 0
-  );
+  if (
+    model.precio_usd == null ||
+    model.precio_usd <= 0 ||
+    (model.tipo_media === 'image' && model.precio_unidad !== 'imagen') ||
+    (model.tipo_media === 'video' && model.precio_unidad !== 'segundo')
+  ) {
+    throw new ValidationError('El modelo no tiene un precio por generación configurado', [
+      { field: 'model_id', message: 'Selecciona un modelo con precio en USD configurado.' },
+    ]);
+  }
+  const units = model.tipo_media === 'video' ? duration : 1;
+  return Number((Number(model.precio_usd) * units).toFixed(4));
 }
 
 function canonicalJson(value: unknown): string {
@@ -262,16 +271,14 @@ const generationQuote: RequestHandler = async (req, res) => {
     if (error) throw new Error(error.message);
     if (!model || model.estado !== 'activo') throw new NotFoundError('Modelo IA disponible');
 
-    const creditCost = quoteGeneration(
+    const priceUsd = quoteGeneration(
       model,
       payload.parametros as Record<string, unknown>,
     );
-    const balance = await creditsService.balance(req.organizationId);
     res.json({
       model_id: String(model.modelo_id),
-      credits_cost: creditCost,
-      available_credits: balance,
-      sufficient_credits: balance >= creditCost,
+      price_usd: priceUsd,
+      currency: 'USD',
     });
   } catch (error) {
     const { status, body } = errorResponse(error);
@@ -281,7 +288,6 @@ const generationQuote: RequestHandler = async (req, res) => {
 
 const generationCreate: RequestHandler = async (req, res) => {
   let generation: Generacion | undefined;
-  let creditsReserved = false;
   try {
     if (!req.organizationId) throw new HttpError(401, 'Sesión no iniciada');
     const payload = generacionRequest.validateCreate(req.body);
@@ -297,7 +303,8 @@ const generationCreate: RequestHandler = async (req, res) => {
         existing.plantilla_id === (payload.plantilla_id ?? null) &&
         existing.modo === payload.modo &&
         existing.prompt === payload.prompt &&
-        existing.creditos_costo === payload.quoted_credits &&
+        existing.precio_usd != null &&
+        Number(existing.precio_usd) === payload.quoted_price_usd &&
         canonicalJson(existing.parametros) === canonicalJson(params);
       if (!sameRequest) throw new HttpError(409, 'La clave de idempotencia ya se usó con otra generación');
       res.status(200).json(generacionResource.format(existing));
@@ -312,12 +319,12 @@ const generationCreate: RequestHandler = async (req, res) => {
     if (modelError) throw new Error(modelError.message);
     if (!model || model.estado !== 'activo') throw new NotFoundError('Modelo IA disponible');
 
-    const creditCost = quoteGeneration(model, params);
+    const priceUsd = quoteGeneration(model, params);
     const duration = Number(params.duration ?? model.duracion_min_s ?? 5);
-    if (payload.quoted_credits !== creditCost) {
-      throw new HttpError(409, 'La cotización cambió. Vuelve a cotizar antes de aceptar la generación.', {
-        quoted_credits: payload.quoted_credits,
-        current_credits: creditCost,
+    if (payload.quoted_price_usd !== priceUsd) {
+      throw new HttpError(409, 'El precio cambió. Vuelve a cotizar antes de aceptar la generación.', {
+        quoted_price_usd: payload.quoted_price_usd,
+        current_price_usd: priceUsd,
       });
     }
     generation = await generationService.create<Generacion>({
@@ -330,20 +337,14 @@ const generationCreate: RequestHandler = async (req, res) => {
       parametros: params,
       idempotency_key: payload.idempotency_key,
       estado: 'created',
-      creditos_costo: 0,
+      precio_usd: null,
       peticion_proveedor_id: null,
       error_mensaje: null,
     }, auditContext(req));
 
     generation = await generationService.update<Generacion>(generation.generacion_id, {
       estado: 'quoted',
-      creditos_costo: creditCost,
-    }, auditContext(req));
-
-    await creditsService.reserve(req.organizationId, creditCost, String(generation.generacion_id));
-    creditsReserved = true;
-    generation = await generationService.update<Generacion>(generation.generacion_id, {
-      estado: 'credits_reserved',
+      precio_usd: priceUsd,
     }, auditContext(req));
 
     const credentials = await higgsfieldCredentials(req.organizationId);
@@ -366,13 +367,6 @@ const generationCreate: RequestHandler = async (req, res) => {
   } catch (error) {
     if (generation) {
       try {
-        if (creditsReserved) {
-          await creditsService.refund(
-            req.organizationId as string,
-            generation.creditos_costo,
-            String(generation.generacion_id),
-          );
-        }
         await generationService.update(generation.generacion_id, {
           estado: 'failed',
           error_mensaje: error instanceof Error ? error.message.slice(0, 1000) : 'No se pudo iniciar la generación',
@@ -408,20 +402,8 @@ const generationGetById: RequestHandler = async (req, res) => {
           outputUrls,
         );
       }
-      if (status.status === 'completed') {
-        await creditsService.confirm(
-          String(generation.empresa_id),
-          generation.creditos_costo,
-          String(generation.generacion_id),
-        );
-      }
       if (status.status === 'failed' || status.status === 'canceled') {
         const finalStatus = status.status === 'canceled' ? 'canceled' : 'failed';
-        await creditsService.refund(
-          String(generation.empresa_id),
-          generation.creditos_costo,
-          String(generation.generacion_id),
-        );
         const updated = await generationService.update<Generacion>(generation.generacion_id, {
           estado: finalStatus,
           error_mensaje: status.error ?? 'El proveedor no pudo completar la generación',

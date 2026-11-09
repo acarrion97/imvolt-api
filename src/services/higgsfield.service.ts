@@ -5,7 +5,6 @@
 // El navegador NUNCA recibe la clave privada del proveedor: la llamada sale
 // siempre del backend. La API expone tres operaciones:
 //
-//   quote(modelo, configuración) → costo estimado en créditos
 //   createJob(entrada)           → { request_id, status }
 //   getStatus(request_id)        → estado normalizado + URL del resultado
 //
@@ -15,12 +14,6 @@
 import axios from 'axios';
 import { HttpError } from '../core/errors';
 import { MediaType } from '../models/creative/media.model';
-
-export interface HiggsfieldQuote {
-  creditos: number;
-  proveedor: string;
-  modelo: string;
-}
 
 export interface HiggsfieldJobRequest {
   provider_model_id: string;
@@ -63,8 +56,6 @@ interface SimulatedJob {
 /** Jobs simulados en memoria (solo existe en modo simulación). */
 const simulatedJobs = new Map<string, SimulatedJob>();
 const SIMULATED_LATENCY_MS = 8000;
-const BASE_CREDITS = { image: 1, video: 3 } as const;
-
 const MODEL_WORKFLOWS: Record<string, { endpoint: string; mediaType: MediaType }> = {
   'higgsfield-ai/soul/v2/standard': {
     endpoint: 'higgsfield-ai/soul/v2/standard',
@@ -102,23 +93,6 @@ function providerError(error: unknown, operation: string): never {
     throw new Error(`Higgsfield ${operation} falló${status ? ` (${status})` : ''}: ${detail}`);
   }
   throw error;
-}
-
-/** Tarifa base por tipo de medio; el multiplicador comercial se aplica en credits.service. */
-function quote(
-  request: Pick<HiggsfieldJobRequest, 'media_type' | 'duration' | 'provider_model_id' | 'prompt'>,
-): HiggsfieldQuote {
-  const base = BASE_CREDITS[request.media_type];
-  const durationExtra =
-    request.media_type === 'video' && request.duration
-      ? Math.max(0, Math.ceil(request.duration / 5) - 1)
-      : 0;
-
-  return {
-    creditos: base + durationExtra,
-    proveedor: 'higgsfield',
-    modelo: request.provider_model_id,
-  };
 }
 
 async function createJob(
@@ -225,4 +199,4 @@ async function getStatus(
   }
 }
 
-export const higgsfieldService = { quote, createJob, getStatus };
+export const higgsfieldService = { createJob, getStatus };

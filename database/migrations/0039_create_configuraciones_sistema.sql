@@ -16,8 +16,7 @@ create table if not exists public.configuraciones_sistema (
 insert into public.configuraciones_sistema (clave, valor, tipo, descripcion)
 values
     ('modo_mantenimiento', 'false', 'booleano', 'Bloquea el acceso de usuarios durante tareas de mantenimiento.'),
-    ('correo_soporte', 'soporte@imvolt.ec', 'texto', 'Correo de contacto que se muestra a los usuarios.'),
-    ('creditos_mensuales_por_defecto', '50', 'numero', 'Créditos asignados al crear una empresa sin un plan explícito.')
+    ('correo_soporte', 'soporte@imvolt.ec', 'texto', 'Correo de contacto que se muestra a los usuarios.')
 on conflict (clave) do nothing;
 
 alter table public.configuraciones_sistema enable row level security;

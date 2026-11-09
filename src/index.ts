@@ -52,7 +52,6 @@ import {
 } from './routes/creative.route';
 import { campaignRouter, campaniaPublicitariaRouter, conexionRouter, objetivoPublicidadRouter } from './routes/advertising.route';
 import { contactoRouter, leadRouter } from './routes/leads.route';
-import { billingRouter } from './routes/billing.route';
 import { platformAdminRouter } from './controllers/platform-admin.controller';
 import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { asegurarBucket } from './services/brandkit.storage';
@@ -135,8 +134,6 @@ app.use('/api/v1/campanias-publicitarias', campaniaPublicitariaRouter);
 app.use('/api/v1/leads', leadRouter);
 app.use('/api/v1/contactos', contactoRouter);
 
-// billing
-app.use('/api/v1/billing', billingRouter);
 app.use('/api/v1/admin', platformAdminRouter);
 
 // brand kit (identidad de marca: archivos en bucket privado + colores)

@@ -73,7 +73,6 @@ const modeloIaShape = {
   duracion_min_s: Joi.number().integer().positive().allow(null),
   duracion_max_s: Joi.number().integer().positive().allow(null),
   ratios: Joi.array().items(Joi.string()).allow(null),
-  creditos_cotizacion: Joi.number().integer().min(0),
   precio_usd: Joi.number().min(0).precision(4).allow(null).description('Precio de lista en USD (por imagen o por segundo)'),
   precio_unidad: Joi.string().valid('imagen', 'segundo').allow(null).description('Unidad del precio de lista'),
   estado: Joi.string().valid('activo', 'inactivo', 'no_disponible'),
@@ -90,7 +89,7 @@ const generacionShape = {
   plantilla_id: fk().allow(null),
   modelo_id: fk(),
   idempotency_key: Joi.string().min(1).max(120),
-  quoted_credits: Joi.number().integer().min(0),
+  quoted_price_usd: Joi.number().positive().precision(4),
   modo: Joi.string().valid('facil', 'pro').default('facil'),
   prompt: Joi.string().min(1).max(10000),
   parametros: Joi.object().unknown(true).default({}),
@@ -98,7 +97,7 @@ const generacionShape = {
 
 export const generacionRequest = new BaseRequest(
   buildSchemas(generacionShape, {
-    required: ['modelo_id', 'idempotency_key', 'quoted_credits', 'prompt'],
+    required: ['modelo_id', 'idempotency_key', 'quoted_price_usd', 'prompt'],
     defaults: { modo: 'facil', parametros: {} },
   })
 );
@@ -111,13 +110,3 @@ export const generacionQuoteRequest = new BaseRequest(
 );
 
 export type GeneracionMediaType = ModeloMediaType;
-
-// ── Recarga de créditos ────────────────────────────────────────────────────
-const rechargeShape = {
-  monto: Joi.number().integer().positive().max(1_000_000),
-  idempotency_key: Joi.string().min(1).max(120),
-};
-
-export const rechargeRequest = new BaseRequest(
-  buildSchemas(rechargeShape, { required: ['monto', 'idempotency_key'] })
-);

@@ -341,18 +341,6 @@ export const crudModules: CrudDocConfig[] = [
     ],
   },
 
-  // ── Créditos ────────────────────────────────────────────────────────────
-  {
-    path: '/api/v1/billing/transactions',
-    tag: 'Créditos',
-    schema: 'CreditTransaction',
-    entity: 'Movimiento de créditos',
-    plural: 'Movimientos de créditos',
-    idExample: 1,
-    disabled: ['create', 'update', 'remove'],
-    filters: [{ name: 'tipo', description: 'Filtra por tipo de movimiento', type: 'string', enum: ['reserva', 'consumo', 'devolucion', 'recarga', 'ajuste'] }],
-  },
-
   // ── Brand Kit ────────────────────────────────────────────────────────────
   {
     path: '/api/v1/brand-assets',
@@ -478,17 +466,16 @@ export const openapiExtraPaths: Record<string, any> = {
       },
       responses: {
         200: {
-          description: 'Cotización de créditos',
+          description: 'Cotización del precio en USD por generación, antes de impuestos',
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['model_id', 'credits_cost', 'available_credits', 'sufficient_credits'],
+                required: ['model_id', 'price_usd', 'currency'],
                 properties: {
                   model_id: { type: 'string' },
-                  credits_cost: { type: 'integer' },
-                  available_credits: { type: 'integer' },
-                  sufficient_credits: { type: 'boolean' },
+                  price_usd: { type: 'number', minimum: 0 },
+                  currency: { type: 'string', enum: ['USD'] },
                 },
               },
             },
@@ -496,34 +483,6 @@ export const openapiExtraPaths: Record<string, any> = {
         },
         401: { $ref: '#/components/responses/Unauthorized' },
         404: { $ref: '#/components/responses/NotFound' },
-      },
-    },
-  },
-  '/api/v1/billing/wallet': {
-    get: {
-      tags: ['Créditos'],
-      summary: 'Consulta la wallet de la empresa activa',
-      responses: {
-        200: { description: 'Wallet de créditos', content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditWallet' } } } },
-        401: { $ref: '#/components/responses/Unauthorized' },
-        403: { $ref: '#/components/responses/Forbidden' },
-      },
-    },
-  },
-  '/api/v1/billing/recharge': {
-    post: {
-      tags: ['Créditos'],
-      summary: 'Recarga créditos (pasarela simulada)',
-      description: 'Disponible para miembros activos. La recarga es un stub de pago y devuelve el saldo actualizado.',
-      requestBody: {
-        required: true,
-        content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditRechargeInput' }, example: { monto: 25, idempotency_key: 'purchase-2026-03-06-001' } } },
-      },
-      responses: {
-        201: { description: 'Wallet actualizada', content: { 'application/json': { schema: { $ref: '#/components/schemas/CreditWallet' } } } },
-        400: { $ref: '#/components/responses/BadRequest' },
-        401: { $ref: '#/components/responses/Unauthorized' },
-        402: { description: 'Créditos insuficientes para la operación' },
       },
     },
   },

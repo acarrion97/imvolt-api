@@ -815,17 +815,16 @@ Object.assign(openapiSchemas, {
     duracion_min_s: { type: 'integer', nullable: true },
     duracion_max_s: { type: 'integer', nullable: true },
     ratios: { type: 'array', items: { type: 'string' }, nullable: true },
-    quote_creditos: { type: 'integer' },
     precio_usd: { type: 'number', nullable: true },
     precio_unidad: { type: 'string', enum: ['imagen', 'segundo'], nullable: true },
     status: { type: 'string', enum: ['activo', 'inactivo', 'no_disponible'] },
     created_at: ts('Fecha de creación'),
-  }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'quote_creditos', 'precio_usd', 'precio_unidad', 'status', 'created_at'], {
+  }, ['model_id', 'provider', 'provider_model_id', 'nombre', 'media_type', 'capabilities', 'precio_usd', 'precio_unidad', 'status', 'created_at'], {
     model_id: '1', provider: 'higgsfield', provider_model_id: 'higgsfield-ai/soul/v2/standard',
     nombre: 'Soul Standard', media_type: 'image', capabilities: { resolution: ['720p', '1080p'] },
     duracion_min_s: null, duracion_max_s: null,
     ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2'],
-    quote_creditos: 10, precio_usd: 0.094, precio_unidad: 'imagen', status: 'activo',
+    precio_usd: 0.094, precio_unidad: 'imagen', status: 'activo',
     created_at: '2026-03-06T09:00:00.000Z',
   }, 'Modelo de IA disponible para cotización y generación'),
   Generacion: contractSchema({
@@ -838,15 +837,15 @@ Object.assign(openapiSchemas, {
     prompt: { type: 'string' },
     parametros: { type: 'object' },
     status: { type: 'string', enum: ['created', 'quoted', 'credits_reserved', 'queued', 'processing', 'completed', 'failed', 'canceled'] },
-    credits_cost: { type: 'integer' },
+    price_usd: { type: 'number', nullable: true },
     provider_request_id: { type: 'string', nullable: true },
     error_message: { type: 'string', nullable: true },
     created_at: ts('Fecha de creación'),
     updated_at: ts('Última modificación'),
-  }, ['generation_id', 'organization_id', 'model_id', 'modo', 'prompt', 'parametros', 'status', 'credits_cost', 'created_at', 'updated_at'], {
+  }, ['generation_id', 'organization_id', 'model_id', 'modo', 'prompt', 'parametros', 'status', 'price_usd', 'created_at', 'updated_at'], {
     generation_id: '19', organization_id: '1', property_id: '3', template_id: '2', model_id: '1',
     modo: 'facil', prompt: 'Render fotorrealista de la propiedad.', parametros: { ratio: '9:16' },
-    status: 'completed', credits_cost: 2, provider_request_id: 'sim_123', error_message: null,
+    status: 'completed', price_usd: 0.094, provider_request_id: 'sim_123', error_message: null,
     created_at: '2026-03-06T11:15:00.000Z', updated_at: '2026-03-06T11:15:00.000Z',
   }, 'Job persistido de generación IA'),
   GeneracionInput: contractSchema({
@@ -854,46 +853,15 @@ Object.assign(openapiSchemas, {
     template_id: stringId('ID de plantilla'),
     model_id: stringId('ID de modelo'),
     idempotency_key: { type: 'string', minLength: 1, maxLength: 120 },
-    quoted_credits: { type: 'integer', minimum: 0, description: 'Costo cotizado por el servidor que el usuario confirmó' },
+    quoted_price_usd: { type: 'number', minimum: 0, multipleOf: 0.0001, description: 'Precio cotizado por el servidor en USD antes de impuestos' },
     modo: { type: 'string', enum: ['facil', 'pro'] },
     prompt: { type: 'string', minLength: 1, maxLength: 10000 },
     parametros: { type: 'object' },
-  }, ['model_id', 'idempotency_key', 'quoted_credits', 'prompt'], {
-    property_id: '3', template_id: '2', model_id: '1', idempotency_key: 'generation-2026-03-06-001', quoted_credits: 10, modo: 'facil',
+  }, ['model_id', 'idempotency_key', 'quoted_price_usd', 'prompt'], {
+    property_id: '3', template_id: '2', model_id: '1', idempotency_key: 'generation-2026-03-06-001', quoted_price_usd: 0.094, modo: 'facil',
     prompt: 'Render fotorrealista de la propiedad.', parametros: { ratio: '9:16' },
   }, 'Payload de generación; el costo y estado los calcula el API'),
-  CreditWallet: contractSchema({
-    wallet_id: stringId('ID de wallet'),
-    organization_id: stringId('ID de empresa'),
-    saldo: { type: 'integer' },
-    moneda: { type: 'string' },
-    created_at: ts('Fecha de creación'),
-    updated_at: ts('Última modificación'),
-  }, ['wallet_id', 'organization_id', 'saldo', 'moneda', 'updated_at'], {
-    wallet_id: '8cbb1b26-2e12-4ca1-9af0-26010f44f001', organization_id: '1',
-    saldo: 25, moneda: 'USD', created_at: '2026-03-06T09:00:00.000Z', updated_at: '2026-03-06T09:00:00.000Z',
-  }, 'Wallet de créditos de la organización'),
-  CreditTransaction: contractSchema({
-    transaction_id: stringId('ID de transacción'),
-    wallet_id: stringId('ID de wallet'),
-    organization_id: stringId('ID de empresa'),
-    tipo: { type: 'string', enum: ['reserva', 'consumo', 'devolucion', 'recarga', 'ajuste'] },
-    monto: { type: 'integer' },
-    creditos: { type: 'integer', minimum: 0, description: 'Créditos involucrados en el movimiento' },
-    generation_id: stringId('ID de generación'),
-    descripcion: { type: 'string', nullable: true },
-    idempotency_key: { type: 'string', nullable: true },
-    created_at: ts('Fecha de creación'),
-  }, ['transaction_id', 'wallet_id', 'organization_id', 'tipo', 'monto', 'creditos', 'created_at'], {
-    transaction_id: '1', wallet_id: '8cbb1b26-2e12-4ca1-9af0-26010f44f001', organization_id: '1',
-    tipo: 'recarga', monto: 25, creditos: 25, generation_id: null, descripcion: 'Créditos de bienvenida IMVOLT',
-    idempotency_key: 'welcome:1', created_at: '2026-03-06T09:00:00.000Z',
-  }, 'Movimiento inmutable del ledger de créditos'),
-  CreditRechargeInput: contractSchema({
-    monto: { type: 'integer', minimum: 1, maximum: 1000000 },
-    idempotency_key: { type: 'string', minLength: 1, maxLength: 120 },
-  }, ['monto', 'idempotency_key'], { monto: 25, idempotency_key: 'purchase-2026-03-06-001' }, 'Payload de recarga simulada'),
 });
 
 /** Nombres de esquema disponibles para `$ref`. */
-export const schemaNames = [...definitions.map((def) => def.name), 'Conexion', 'Campaign', 'Lead', 'ModeloIa', 'Generacion', 'CreditWallet', 'CreditTransaction'];
+export const schemaNames = [...definitions.map((def) => def.name), 'Conexion', 'Campaign', 'Lead', 'ModeloIa', 'Generacion'];

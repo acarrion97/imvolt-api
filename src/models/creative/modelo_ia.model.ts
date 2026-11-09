@@ -23,7 +23,6 @@ export interface ModeloIa {
   duracion_min_s: number | null;
   duracion_max_s: number | null;
   ratios: string[] | null;
-  creditos_cotizacion: number;
   precio_usd: number | null;
   precio_unidad: ModeloPrecioUnidad | null;
   estado: ModeloStatus;
@@ -42,7 +41,6 @@ export interface ModeloIaView {
   duracion_min_s: number | null;
   duracion_max_s: number | null;
   ratios: string[] | null;
-  quote_creditos: number;
   precio_usd: number | null;
   precio_unidad: ModeloPrecioUnidad | null;
   status: ModeloStatus;
