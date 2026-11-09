@@ -475,13 +475,14 @@ Vercel. Configura `META_GRAPH_API_VERSION` en el frontend y el backend con la
 misma versión. Nunca pongas `META_APP_SECRET` ni `META_TOKEN_ENCRYPTION_KEY`
 en el frontend.
 
-En Meta Developer → Facebook Login → Configuración, habilita el SDK de
-JavaScript, añade `localhost` y `imvolt.vercel.app` a **Dominios de la app** y
-registra estas URI en **URI de redireccionamiento de OAuth válidos**:
+En Meta Developer → Facebook Login → Configuración, añade `localhost` y
+`imvolt.vercel.app` a **Dominios de la app** y registra estas URI en **URI de
+redireccionamiento de OAuth válidos**. Deben coincidir exactamente con
+`PUBLIC_API_URL + /api/v1/conexiones/meta/oauth/callback`:
 
 ```text
-http://localhost:5173/
-https://imvolt.vercel.app/
+http://localhost:3000/api/v1/conexiones/meta/oauth/callback
+https://imvolt-api.onrender.com/api/v1/conexiones/meta/oauth/callback
 ```
 
 Para probar en local, configura en `api/.env`:
@@ -493,15 +494,14 @@ ALLOWED_ORIGIN=http://localhost:5173
 ```
 
 Y en `frontend/.env`, usa `VITE_API_URL=http://localhost:3000/api`,
-`VITE_DATA_PROVIDER=rest`, `META_APP_ID` y `META_LOGIN_CONFIG_ID`. Si Meta no
-permite completar el popup desde HTTP local, prueba desde un origen HTTPS.
+`VITE_DATA_PROVIDER=rest`, `META_APP_ID` y `META_LOGIN_CONFIG_ID`.
 
-El botón de Facebook Login for Business usa ese `config_id`, y tras autorizar
-consulta `FB.getLoginStatus` para completar la conexión con
-`POST /api/v1/conexiones/meta/oauth/complete`; no redirige al callback del API.
-Si aún necesitas el flujo OAuth de redirección legado, añade también:
-
-`https://imvolt-api.onrender.com/api/v1/conexiones/meta/oauth/callback`
+El botón «Conectar con Facebook» redirige el navegador al diálogo OAuth de
+Facebook con `config_id` (Facebook Login for Business) y `response_type=code`.
+Facebook no admite `response_type=token` en ese flujo; el código se intercambia
+en el servidor mediante `GET /api/v1/conexiones/meta/oauth/callback`, que
+valida el `state`, canjea el código con `META_APP_SECRET` y redirige a
+`/configuracion?meta=…`. El frontend no usa el SDK de JavaScript de Facebook.
 
 En **Solicitudes de eliminación de datos**, configura:
 
