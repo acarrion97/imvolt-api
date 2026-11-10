@@ -13,7 +13,6 @@
 //      ni borrando un usuario ni quitándole su rol propietario se puede
 //      bloquear el acceso al tenant.
 
-import { randomBytes } from 'crypto';
 import supabase from '../config/supabaseClient';
 import { HttpError, ValidationError } from '../core/errors';
 import { ORG_ROLES, OrgRole } from '../middlewares/requireRole';
@@ -47,9 +46,9 @@ export interface ContextoMiembros {
   empresaId: string | number;
 }
 
-/** Contraseña temporal: aleatoria, sin caracteres ambiguos, 12 caracteres. */
-function contraseniaTemporal(): string {
-  return randomBytes(9).toString('base64url');
+/** Contraseña inicial solicitada por la empresa: parte local del correo + *. */
+function contraseniaTemporal(email: string): string {
+  return `${email.split('@')[0]}*`;
 }
 
 /** Valida que el rol exista en el catálogo §13 y lo devuelve tipado. */
@@ -98,7 +97,7 @@ export async function invitarMiembro(
 
   // 2) Credencial en Supabase Auth (confirmada: la contraseña temporal se
   //    entrega por otro canal y el usuario la cambia al ingresar).
-  const password = contraseniaTemporal();
+  const password = contraseniaTemporal(email);
   const { data: auth, error: authError } = await supabase.auth.admin.createUser({
     email,
     password,
