@@ -69,66 +69,9 @@ export async function register(input: RegisterInput): Promise<RegisterResult> {
     throw new HttpError(500, `No se pudo resolver el plan predeterminado: ${planError.message}`);
   }
 
-  // 1) Empresa (tenant)
-  const { data: empresa, error: empresaError } = await supabase
-    .from('empresas')
-    .insert([
-      {
-        razon_social: input.organization_name,
-        ruc: input.ruc ?? null,
-        plan_id: (planPredeterminado as { plan_id: number } | null)?.plan_id ?? null,
-        estado: 'activo',
-      },
-    ])
-    .select()
-    .single();
-
-  if (empresaError) {
-    throw new HttpError(500, `No se pudo crear la empresa: ${empresaError.message}`);
-  }
-
-  const empresaId = (empresa as { empresa_id: number }).empresa_id;
-
-  // 2) Usuario local (vinculado por email con Supabase Auth)
-  const { data: usuario, error: usuarioError } = await supabase
-    .from('usuarios')
-    .insert([
-      {
-        nombre: `${input.nombres} ${input.apellidos}`.trim(),
-        email: input.email,
-        telefono: input.telefono ?? null,
-        empresa_id: empresaId,
-        estado: 'activo',
-      },
-    ])
-    .select()
-    .single();
-
-  if (usuarioError) {
-    throw new HttpError(500, `No se pudo crear el usuario: ${usuarioError.message}`);
-  }
-
-  const usuarioId = (usuario as Usuario).usuario_id;
-
-  // 3) Rol propietario (se crea en la semilla; si no existe, se crea aquí)
-  const { data: rolExistente } = await supabase
-    .from('roles')
-    .select('rol_id')
-    .eq('nombre', 'propietario')
-    .maybeSingle();
-
-  let rolId = (rolExistente as { rol_id: number } | null)?.rol_id ?? null;
-
-  if (!rolId) {
-    const { data: rolNuevo, error: rolError } = await supabase
-      .from('roles')
-      .insert([{ nombre: 'propietario', estado: 'activo' }])
-      .select()
-      .single();
-
-    if (rolError) throw new HttpError(500, `No se pudo crear el rol: ${rolError.message}`);
-    rolId = (rolNuevo as { rol_id: number }).rol_id;
-  }
+  const empresaId = await registrarEmpresa(input, planPredeterminado, userId);
+  const usuarioId = await registrarUsuarioData(input, empresaId);
+  const rolId = await obtener_rolId('administrador');
 
   const { error: asignacionError } = await supabase.from('roles_usuarios').insert([
     {
@@ -250,4 +193,81 @@ export async function me(email: string | undefined): Promise<{
   };
 }
 
+ async function registrarEmpresa(input: RegisterInput, planPredeterminado: { plan_id: any; nombre: any; } | null, userId: string) {
+  const { data: empresa, error: empresaError } = await supabase
+    .from('empresas')
+    .insert([
+      {
+        razon_social: input.organization_name,
+        ruc: input.ruc ?? null,
+        plan_id: (planPredeterminado as { plan_id: number } | null)?.plan_id ?? null,
+        estado: 'activo',
+      },
+    ])
+    .select()
+    .single();
+
+  if (empresaError) {
+    throw new HttpError(500, `No se pudo crear la empresa: ${empresaError.message}`);
+  }
+
+  const empresaId = (empresa as { empresa_id: number }).empresa_id;
+  return empresaId;
+
+}
+
+async function registrarUsuarioData(input: RegisterInput, empresaId: number): Promise<number> {
+  const { data: usuario, error } = await supabase
+    .from('usuarios')
+    .insert([
+      {
+        email: input.email,
+        nombres: input.nombres,
+        apellidos: input.apellidos,
+        telefono: input.telefono ?? null,
+        empresa_id: empresaId,
+        estado: 'activo',
+      },
+    ])
+    .select('usuario_id')
+    .single();
+
+  if (error) {
+    throw new HttpError(500, `No se pudo crear el usuario: ${error.message}`);
+  }
+
+  return (usuario as { usuario_id: number }).usuario_id;
+}
+
+async function obtener_rolId(nombre: string): Promise<number> {
+  const { data: rolExistente, error: consultaError } = await supabase
+    .from('roles')
+    .select('rol_id')
+    .eq('nombre', nombre)
+    .maybeSingle();
+
+  if (consultaError) {
+    throw new HttpError(500, `No se pudo consultar el rol: ${consultaError.message}`);
+  }
+
+  if (rolExistente) {
+    return (rolExistente as { rol_id: number }).rol_id;
+  }
+
+  const { data: rolNuevo, error: rolError } = await supabase
+    .from('roles')
+    .insert([{ nombre, estado: 'activo' }])
+    .select('rol_id')
+    .single();
+
+  if (rolError) {
+    throw new HttpError(500, `No se pudo crear el rol: ${rolError.message}`);
+  }
+
+  return (rolNuevo as { rol_id: number }).rol_id;
+}
+
 export const authService = { register, login, me };
+
+
+
