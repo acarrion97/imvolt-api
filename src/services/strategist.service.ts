@@ -38,6 +38,11 @@ export interface AnguloCreativo {
 }
 
 export interface EstrategaOutput {
+  presupuesto?: number;
+  publico_objetivo?: string;
+  datos_confirmados?: Record<string, string | number>;
+  datos_faltantes?: string[];
+  generador_version?: string;
   propiedad: string;
   objetivo: string;
   angulos: AnguloCreativo[];

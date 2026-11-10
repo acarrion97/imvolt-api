@@ -24,6 +24,8 @@ import {
 import { metaService, MetaCredentials } from '../services/meta.service';
 import { strategistService } from '../services/strategist.service';
 import type { PropiedadEstrategica } from '../services/strategist.service';
+import { generarEstrategiaConOpenRouter, GENERATOR_VERSION } from '../services/openrouter.service';
+import { obtenerMetricasMeta } from '../services/analytics.service';
 import {
   campaignRequest,
   campaniaPublicitariaRequest,
@@ -104,6 +106,7 @@ async function guardarConexionMeta(result: Awaited<ReturnType<typeof exchangeMet
     { empresaId: result.empresaId },
   );
 }
+
 
 function redirigirMeta(res: Response, status: string): void {
   try {
@@ -560,10 +563,15 @@ async function decidirAprobacion(req: Request, res: Response, decision: 'approve
 
 async function generarEstrategia(req: Request, res: Response): Promise<void> {
   try {
-    const propertyId = Number(req.body?.property_id);
+    const rawPropertyId = req.body?.property_id;
+    const propertyId = Number(rawPropertyId);
     const objective = req.body?.objetivo;
+    const budget = req.body?.presupuesto;
+    const audience = req.body?.publico_objetivo;
     const validObjectives = ['visitas', 'trafico', 'mensajes', 'formularios', 'branding'];
-    if (!Number.isSafeInteger(propertyId) || propertyId <= 0 || !validObjectives.includes(objective)) {
+    if ((!Number.isSafeInteger(rawPropertyId) && !(typeof rawPropertyId === 'string' && /^[1-9]\d*$/.test(rawPropertyId))) || !Number.isSafeInteger(propertyId) || propertyId <= 0 ||
+      !validObjectives.includes(objective) || typeof budget !== 'number' || !Number.isFinite(budget) || budget < 1 || budget > 100000 ||
+      typeof audience !== 'string' || audience.trim().length < 2 || audience.trim().length > 500) {
       throw new ValidationError('Selecciona una propiedad y un objetivo válidos.');
     }
     const { data, error } = await supabase
@@ -585,8 +593,111 @@ async function generarEstrategia(req: Request, res: Response): Promise<void> {
     if (!propiedad.nombre || (propiedad.precio !== null && !Number.isFinite(propiedad.precio))) {
       throw new ValidationError('La ficha de propiedad no contiene datos válidos.');
     }
-    res.json(strategistService.build({ propiedad, objetivo: objective }));
+    const input = { propiedad, objetivo: objective as 'visitas' | 'trafico' | 'mensajes' | 'formularios' | 'branding' };
+    const base = strategistService.build(input);
+    const providerResult = await generarEstrategiaConOpenRouter(input, budget, audience.trim());
+    const ai = providerResult.strategy;
+    const estrategia = {
+      ...base,
+      ...ai,
+      presupuesto: budget,
+      publico_objetivo: audience.trim(),
+      datos_confirmados: {
+        nombre: propiedad.nombre,
+        ...(propiedad.ubicacion ? { ubicacion: propiedad.ubicacion } : {}),
+        ...(propiedad.precio !== null ? { precio: propiedad.precio } : {}),
+        ...(propiedad.disponibilidad ? { disponibilidad: propiedad.disponibilidad } : {}),
+        ...(propiedad.descripcion ? { descripcion: propiedad.descripcion } : {}),
+      },
+      datos_faltantes: [
+        ...(!propiedad.ubicacion ? ['ubicacion'] : []),
+        ...(propiedad.precio === null ? ['precio'] : []),
+        ...(!propiedad.disponibilidad ? ['disponibilidad'] : []),
+        ...(!propiedad.descripcion ? ['descripcion'] : []),
+      ],
+      generador_version: GENERATOR_VERSION,
+    };
+    console.info(JSON.stringify({ event: 'ai_strategy_provider', provider: providerResult.provider, model: providerResult.model, status: 'succeeded', duration_ms: providerResult.durationMs, estimated_cost_usd: providerResult.estimatedCostUsd }));
+    const { data: registro, error: registroError } = await supabase.from('estrategias_comerciales').insert({
+      propiedad_id: propertyId,
+      empresa_id: Number(req.organizationId),
+      usuario_id: req.localUsuarioId ?? null,
+      auth_user_id: req.userId ?? null,
+      objetivo: objective,
+      presupuesto: budget,
+      publico_objetivo: audience.trim(),
+      generador_version: GENERATOR_VERSION,
+      proveedor: providerResult.provider,
+      modelo_proveedor: providerResult.model,
+      estado_proveedor: 'succeeded',
+      duracion_proveedor_ms: providerResult.durationMs,
+      costo_estimado_usd: providerResult.estimatedCostUsd,
+      resultado: estrategia,
+    }).select('estrategia_id, creado_en').single();
+    if (registroError) throw new Error('STRATEGY_AUDIT_WRITE_FAILED');
+    await logAudit('estrategias_comerciales', 'CREATE', registro.estrategia_id, {
+      propiedad_id: propertyId,
+      generador_version: GENERATOR_VERSION,
+    }, { authUserId: req.userId, usuarioId: req.localUsuarioId, empresaId: req.organizationId });
+    res.json({ ...estrategia, estrategia_id: registro.estrategia_id, creado_en: registro.creado_en });
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('OPENROUTER_')) {
+      console.warn(JSON.stringify({ event: 'ai_strategy_provider', provider: 'openrouter', status: 'failed', error_code: error.message }));
+      res.status(502).json({ message: 'No fue posible generar la estrategia ahora. Intenta nuevamente más tarde.' });
+      return;
+    }
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+}
+
+async function consultarAnaliticaCampanas(req: Request, res: Response): Promise<void> {
+  try {
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const desde = typeof req.query.desde === 'string' ? req.query.desde : '';
+    const hasta = typeof req.query.hasta === 'string' ? req.query.hasta : '';
+    const fuente = typeof req.query.fuente === 'string' ? req.query.fuente : 'meta';
+    const campaignId = typeof req.query.campania_id === 'string' ? req.query.campania_id : '';
+    const limit = req.query.limit === undefined ? 25 : Number(req.query.limit);
+    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+    const fromDate = new Date(`${desde}T00:00:00Z`);
+    const toDate = new Date(`${hasta}T00:00:00Z`);
+    const days = (toDate.getTime() - fromDate.getTime()) / 86400000;
+    if (!datePattern.test(desde) || !datePattern.test(hasta) || Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) ||
+      fromDate.toISOString().slice(0, 10) !== desde || toDate.toISOString().slice(0, 10) !== hasta ||
+      days < 0 || days > 90 || fuente !== 'meta' || !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+      !Number.isInteger(offset) || offset < 0 || (campaignId && !/^[1-9]\d*$/.test(campaignId))) {
+      throw new ValidationError('Parámetros inválidos. Usa desde/hasta YYYY-MM-DD (máximo 90 días), fuente=meta, campania_id opcional, limit 1-100 y offset >= 0.');
+    }
+    let query = supabase.from('campanias_publicitarias')
+      .select('campania_publicitaria_id, nombre, meta_campaign_id, conexion_id', { count: 'exact' })
+      .eq('empresa_id', Number(req.organizationId))
+      .order('campania_publicitaria_id', { ascending: true })
+      .range(offset, offset + limit - 1);
+    if (campaignId) query = query.eq('campania_publicitaria_id', Number(campaignId));
+    const { data, error, count } = await query;
+    if (error) throw new Error(error.message);
+    const metricas = await Promise.all((data ?? []).map(async (row) => {
+      const credentials = row.meta_campaign_id
+        ? await credencialesMeta(req.organizationId as string, row.conexion_id == null ? null : Number(row.conexion_id))
+        : null;
+      return obtenerMetricasMeta({
+        campaign_id: String(row.campania_publicitaria_id),
+        campaign_name: row.nombre == null ? null : String(row.nombre),
+        meta_campaign_id: row.meta_campaign_id == null ? null : String(row.meta_campaign_id),
+      }, credentials, desde, hasta);
+    }));
+    res.json({
+      items: metricas,
+      pagination: { limit, offset, total: count ?? 0, has_more: offset + metricas.length < (count ?? 0) },
+      formulas: { ctr: 'clics / impresiones * 100; null cuando impresiones es 0 o falta algún dato', cpl: 'gasto / leads; null cuando leads es 0 o falta algún dato' },
+      datos: { fuente: 'Meta Marketing API Insights', actualizado_en: new Date().toISOString(), antiguedad: 'Meta puede revisar y actualizar las métricas; la API no garantiza tiempo real. El campo actualizado_en indica cuándo se consultó, no cuándo Meta originó cada evento.' },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'CAMPAIGN_ANALYTICS_PROVIDER_ERROR') {
+      res.status(502).json({ message: 'Meta no pudo devolver las métricas solicitadas. Intenta más tarde.' });
+      return;
+    }
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
   }
@@ -665,6 +776,7 @@ export const { router: campaignRouter } = createCrudRouter({
   tenantScoped: true,
   tenantColumn: 'empresa_id',
   extraRoutes: (router) => {
+    router.get('/reports/analytics', ...requireOrg, requirePermission('ver_analitica'), consultarAnaliticaCampanas);
     router.post(
       '/strategist',
       ...requireOrg,

@@ -6,8 +6,42 @@ export {
   campaignRouter,
   campaniaPublicitariaRouter,
   conexionRouter,
-  objetivoPublicidadRouter,
+  objetivoPublicidadRouter
 } from '../controllers/advertising.controller';
+
+/**
+ * @swagger
+ * /api/v1/campaigns/reports/analytics:
+ *   get:
+ *     summary: Consulta métricas de campañas en Meta
+ *     description: Requiere sesión y permiso ver_analitica. Rango inclusivo máximo de 90 días; limit entre 1 y 100. Meta puede revisar y actualizar Insights después de la consulta, por lo que no se garantiza tiempo real. actualizado_en es la hora de consulta, no la fecha de origen de eventos.
+ *     tags: [Analítica]
+ *     parameters:
+ *       - in: query
+ *         name: desde
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: hasta
+ *         required: true
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: fuente
+ *         schema: { type: string, enum: [meta], default: meta }
+ *       - in: query
+ *         name: campania_id
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, minimum: 0, default: 0 }
+ *     responses:
+ *       200: { description: Métricas agregadas por campaña; CTR es clics/impresiones × 100 y CPL es gasto/leads. Si falta el dato o el denominador es cero, la métrica derivada es null. }
+ *       403: { description: Falta el permiso ver_analitica }
+ *       502: { description: Meta no entregó las métricas }
+ */
 
 /**
  * @swagger
