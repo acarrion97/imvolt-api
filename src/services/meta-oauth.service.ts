@@ -350,7 +350,24 @@ async function persistMetaToken(
         timeout: 15000,
       });
       response = data;
-    } catch {
+    } catch (error) {
+      const graphError = axios.isAxiosError<{
+        error?: {
+          code?: number;
+          error_subcode?: number;
+          type?: string;
+          fbtrace_id?: string;
+        };
+      }>(error)
+        ? error.response?.data?.error
+        : undefined;
+      console.error('[meta] GET /me/adaccounts falló', {
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        code: graphError?.code,
+        subcode: graphError?.error_subcode,
+        type: graphError?.type,
+        fbtrace_id: graphError?.fbtrace_id,
+      });
       throw new HttpError(502, 'No se pudieron leer las cuentas publicitarias autorizadas en Meta.');
     }
 
