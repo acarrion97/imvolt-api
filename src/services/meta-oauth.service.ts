@@ -353,6 +353,7 @@ async function persistMetaToken(
     } catch (error) {
       const graphError = axios.isAxiosError<{
         error?: {
+          message?: string;
           code?: number;
           error_subcode?: number;
           type?: string;
@@ -363,12 +364,26 @@ async function persistMetaToken(
         : undefined;
       console.error('[meta] GET /me/adaccounts falló', {
         status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        message: graphError?.message,
         code: graphError?.code,
         subcode: graphError?.error_subcode,
         type: graphError?.type,
         fbtrace_id: graphError?.fbtrace_id,
       });
-      throw new HttpError(502, 'No se pudieron leer las cuentas publicitarias autorizadas en Meta.');
+      throw new HttpError(
+        502,
+        'No se pudieron leer las cuentas publicitarias autorizadas en Meta.',
+        {
+          provider: 'meta',
+          endpoint: '/me/adaccounts',
+          status: axios.isAxiosError(error) ? error.response?.status : undefined,
+          message: graphError?.message,
+          type: graphError?.type,
+          code: graphError?.code,
+          error_subcode: graphError?.error_subcode,
+          fbtrace_id: graphError?.fbtrace_id,
+        },
+      );
     }
 
     accounts.push(...response.data);
