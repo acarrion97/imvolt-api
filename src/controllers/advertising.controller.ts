@@ -120,21 +120,38 @@ async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
   const state = typeof req.query.state === 'string' ? req.query.state : '';
   const code = typeof req.query.code === 'string' ? req.query.code : '';
   const providerError = typeof req.query.error === 'string' ? req.query.error : '';
+  const providerErrorDescription =
+    typeof req.query.error_description === 'string' ? req.query.error_description : '';
+  const providerErrorReason =
+    typeof req.query.error_reason === 'string' ? req.query.error_reason : '';
 
   if (!state || state.length !== 64) {
-    redirigirMeta(res, 'error');
+    res.status(400).json({
+      ok: false,
+      error: 'invalid_oauth_callback',
+      message: 'Meta no devolvió un estado OAuth válido.',
+    });
     return;
   }
 
   try {
     if (providerError) {
       await consumeMetaOAuthState(state);
-      redirigirMeta(res, providerError === 'access_denied' ? 'cancelled' : 'error');
+      res.status(providerError === 'access_denied' ? 400 : 502).json({
+        ok: false,
+        error: providerError,
+        message: providerErrorDescription || 'Meta rechazó la autorización.',
+        reason: providerErrorReason || undefined,
+      });
       return;
     }
     if (!code || code.length > 4096) {
       await consumeMetaOAuthState(state);
-      redirigirMeta(res, 'error');
+      res.status(400).json({
+        ok: false,
+        error: 'missing_oauth_code',
+        message: 'Meta no devolvió el código de autorización.',
+      });
       return;
     }
 
@@ -142,8 +159,22 @@ async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
     await guardarConexionMeta(result);
     redirigirMeta(res, 'connected');
   } catch (error) {
-    const { status } = errorResponse(error);
-    redirigirMeta(res, status === 422 ? 'no_accounts' : 'error');
+    const status = error instanceof HttpError ? error.statusCode : 500;
+    const message = error instanceof HttpError ? error.message : 'Error interno al conectar Meta.';
+    const details = error instanceof HttpError ? error.details : undefined;
+    console.error('[meta][oauth] callback falló', {
+      status,
+      message,
+      details,
+      state_present: Boolean(state),
+      code_present: Boolean(code),
+    });
+    res.status(status).json({
+      ok: false,
+      error: 'meta_oauth_failed',
+      message,
+      details,
+    });
   }
 }
 
