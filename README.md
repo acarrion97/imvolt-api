@@ -525,6 +525,22 @@ de anuncios y vuelve a conectar las cuentas existentes para guardar su moneda
 de facturación. Cada persona solo podrá seleccionar cuentas publicitarias,
 páginas y cuentas de Instagram a las que su Facebook tenga acceso.
 
+### Webhook de WhatsApp Business
+
+En Meta configura la URL de devolución como
+`https://imvolt-api.onrender.com/api/webhooks/whatsapp`. Define en Render la
+variable `WHATSAPP_WEBHOOK_VERIFY_TOKEN` con un valor aleatorio de al menos 32
+caracteres y copia exactamente el mismo valor en el campo **Token de
+verificación** de Meta. Mantén `META_APP_SECRET` configurada: se usa para
+validar la firma de las notificaciones POST. Genera un token con
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+
+El endpoint GET verifica la suscripción y el POST valida la firma y confirma la
+recepción de eventos de `whatsapp_business_account`; por ahora no guarda ni
+procesa mensajes. La URL del webhook de clientes potenciales sigue siendo
+`https://imvolt-api.onrender.com/api/webhooks/meta` y usa
+`META_WEBHOOK_VERIFY_TOKEN`, independiente del token de WhatsApp.
+
 Desde Estudio, una generación completada puede convertirse en un anuncio de
 formulario: el usuario elige cuenta y página, ciudad disponible en Meta,
 presupuesto diario en la moneda de la cuenta, periodo, título, texto y URL HTTPS

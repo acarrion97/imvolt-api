@@ -141,6 +141,14 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('META_WEBHOOK_VERIFY_TOKEN debe tener al menos 32 caracteres aleatorios.');
   }
 
+  const whatsappWebhookToken = get('WHATSAPP_WEBHOOK_VERIFY_TOKEN');
+  if (whatsappWebhookToken && whatsappWebhookToken.length < 32) {
+    errors.push('WHATSAPP_WEBHOOK_VERIFY_TOKEN debe tener al menos 32 caracteres aleatorios.');
+  }
+  if (whatsappWebhookToken && !metaAppSecret) {
+    errors.push('META_APP_SECRET es obligatoria para validar la firma del webhook de WhatsApp.');
+  }
+
   return { errors, warnings };
 }
 

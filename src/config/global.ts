@@ -23,6 +23,7 @@ export const {
   META_APP_SECRET = '',
   META_TOKEN_ENCRYPTION_KEY = '',
   META_WEBHOOK_VERIFY_TOKEN = '',
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN = '',
   INTEGRATION_CREDENTIALS_ENCRYPTION_KEY = '',
   PUBLIC_FRONTEND_URL = '',
   META_GRAPH_API_VERSION = '',
@@ -77,6 +78,7 @@ export const config = {
       : '',
   },
   metaWebhookVerifyToken: META_WEBHOOK_VERIFY_TOKEN.trim(),
+  whatsappWebhookVerifyToken: WHATSAPP_WEBHOOK_VERIFY_TOKEN.trim(),
   integrationCredentialsEncryptionKey: INTEGRATION_CREDENTIALS_ENCRYPTION_KEY.trim(),
   db: {
     url: SUPABASE_URL,
