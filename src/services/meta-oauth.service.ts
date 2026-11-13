@@ -55,7 +55,86 @@ interface MetaDebugTokenResponse {
     is_valid: boolean;
     user_id?: string;
     scopes?: string[];
+    granular_scopes?: Array<{ scope: string; target_ids?: string[] }>;
   };
+}
+
+interface MetaGraphErrorResponse {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: number;
+    error_subcode?: number;
+    fbtrace_id?: string;
+  };
+}
+
+const REQUIRED_AD_SCOPES = ['ads_read', 'ads_management'] as const;
+
+function metaErrorDetails(error: unknown, endpoint: string): Record<string, unknown> {
+  if (!axios.isAxiosError<MetaGraphErrorResponse>(error)) return { endpoint };
+  const meta = error.response?.data?.error;
+  return {
+    endpoint,
+    ...(error.response?.status ? { status: error.response.status } : {}),
+    ...(meta?.message ? { message: meta.message } : {}),
+    ...(meta?.type ? { type: meta.type } : {}),
+    ...(meta?.code !== undefined ? { code: meta.code } : {}),
+    ...(meta?.error_subcode !== undefined ? { error_subcode: meta.error_subcode } : {}),
+    ...(meta?.fbtrace_id ? { fbtrace_id: meta.fbtrace_id } : {}),
+  };
+}
+
+async function validateMetaAccessToken(
+  accessToken: string,
+  expectedMetaUserId?: string,
+): Promise<void> {
+  const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
+  let debug: MetaDebugTokenResponse['data'];
+  try {
+    const { data } = await axios.get<MetaDebugTokenResponse>(`${graphUrl}/debug_token`, {
+      params: {
+        input_token: accessToken,
+        access_token: `${config.metaOAuth.appId}|${config.metaOAuth.appSecret}`,
+      },
+      timeout: 15000,
+    });
+    debug = data.data;
+  } catch (error) {
+    throw new HttpError(
+      502,
+      'Meta no pudo validar el token de acceso. Revisa la respuesta de diagnóstico.',
+      metaErrorDetails(error, '/debug_token'),
+    );
+  }
+
+  if (!debug?.is_valid || debug.app_id !== config.metaOAuth.appId || !debug.user_id) {
+    throw new HttpError(401, 'Meta devolvió un token inválido o perteneciente a otra app.', {
+      endpoint: '/debug_token',
+      valid: Boolean(debug?.is_valid),
+      app_matches: debug?.app_id === config.metaOAuth.appId,
+    });
+  }
+  if (expectedMetaUserId && debug.user_id !== expectedMetaUserId) {
+    throw new HttpError(401, 'El token de Meta no coincide con la cuenta autorizada.', {
+      endpoint: '/debug_token',
+    });
+  }
+
+  const grantedScopes = new Set(debug.scopes ?? []);
+  const missingScopes = REQUIRED_AD_SCOPES.filter((scope) => !grantedScopes.has(scope));
+  if (missingScopes.length) {
+    throw new HttpError(
+      403,
+      'Meta no concedió los permisos publicitarios necesarios. Revisa la configuración de Facebook Login for Business y el acceso de la app a esos permisos.',
+      {
+        endpoint: '/debug_token',
+        missing_scopes: missingScopes,
+        granted_scopes: debug.scopes ?? [],
+        granular_scopes: debug.granular_scopes ?? [],
+      },
+    );
+  }
 }
 
 function assertOAuthConfig(): void {
@@ -335,6 +414,10 @@ async function persistMetaToken(
     throw new HttpError(502, 'Meta no pudo emitir una autorización de larga duración. Intenta de nuevo.');
   }
 
+  // Validate the final token (not the temporary OAuth code/token) before the
+  // ad-account edge. This makes missing grants explicit for both OAuth flows.
+  await validateMetaAccessToken(accessToken, expectedMetaUserId);
+
   const accounts: MetaAdAccount[] = [];
   let after: string | undefined;
   for (let page = 0; page < MAX_AD_ACCOUNT_PAGES; page += 1) {
@@ -350,8 +433,21 @@ async function persistMetaToken(
         timeout: 15000,
       });
       response = data;
-    } catch {
-      throw new HttpError(502, 'No se pudieron leer las cuentas publicitarias autorizadas en Meta.');
+    } catch (error) {
+      const details = metaErrorDetails(error, '/me/adaccounts');
+      console.error('[meta] No se pudieron leer las cuentas publicitarias', JSON.stringify(details));
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
+        throw new HttpError(
+          403,
+          'Meta denegó la lectura de las cuentas publicitarias. Comprueba ads_read/ads_management, el acceso avanzado de la app y el acceso de esta persona a la cuenta.',
+          details,
+        );
+      }
+      throw new HttpError(
+        502,
+        'No se pudieron leer las cuentas publicitarias autorizadas en Meta.',
+        details,
+      );
     }
 
     accounts.push(...response.data);
