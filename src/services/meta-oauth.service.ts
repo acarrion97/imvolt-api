@@ -434,8 +434,11 @@ async function persistMetaToken(
       });
       response = data;
     } catch (error) {
-      const details = metaErrorDetails(error, '/me/adaccounts');
-      console.error('[meta] No se pudieron leer las cuentas publicitarias', JSON.stringify(details));
+      const details = {
+        provider: 'meta',
+        ...metaErrorDetails(error, '/me/adaccounts'),
+      };
+      console.error('[meta] GET /me/adaccounts falló', details);
       if (axios.isAxiosError(error) && error.response?.status === 403) {
         throw new HttpError(
           403,
