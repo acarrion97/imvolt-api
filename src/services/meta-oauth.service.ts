@@ -45,10 +45,6 @@ export interface MetaAdLocation {
   country_code?: string;
 }
 
-interface MetaUserResponse {
-  id: string;
-}
-
 interface MetaDebugTokenResponse {
   data: {
     app_id: string;
@@ -88,7 +84,7 @@ function metaErrorDetails(error: unknown, endpoint: string): Record<string, unkn
 async function validateMetaAccessToken(
   accessToken: string,
   expectedMetaUserId?: string,
-): Promise<void> {
+): Promise<MetaDebugTokenResponse['data']> {
   const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
   let debug: MetaDebugTokenResponse['data'];
   try {
@@ -123,7 +119,7 @@ async function validateMetaAccessToken(
 
   const grantedScopes = new Set(debug.scopes ?? []);
   const missingScopes = REQUIRED_AD_SCOPES.filter((scope) => !grantedScopes.has(scope));
-  if (missingScopes.length) {
+  if (missingScopes.length && !config.metaOAuth.allowLimitedAccess) {
     throw new HttpError(
       403,
       'Meta no concedió los permisos publicitarios necesarios. Revisa la configuración de Facebook Login for Business y el acceso de la app a esos permisos.',
@@ -135,6 +131,7 @@ async function validateMetaAccessToken(
       },
     );
   }
+  return debug;
 }
 
 function assertOAuthConfig(): void {
@@ -223,6 +220,9 @@ export async function exchangeMetaCode(code: string, state: string): Promise<{
   accounts: MetaAdAccount[];
   encryptedToken: string;
   expiresAt: string | null;
+  limitedAccess: boolean;
+  grantedScopes: string[];
+  missingAdScopes: string[];
 }> {
   assertOAuthConfig();
   if (!config.metaOAuth.callbackUrl) {
@@ -262,6 +262,9 @@ export async function exchangeMetaSdkToken(
   accounts: MetaAdAccount[];
   encryptedToken: string;
   expiresAt: string | null;
+  limitedAccess: boolean;
+  grantedScopes: string[];
+  missingAdScopes: string[];
 }> {
   assertOAuthConfig();
   const oauthState = await consumeMetaOAuthState(state);
@@ -288,17 +291,8 @@ export async function exchangeMetaSdkToken(
     throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
   }
   const scopes = new Set(debug.scopes ?? []);
-  const missingScopes = [
-    'ads_management',
-    'ads_read',
-    'pages_show_list',
-    'pages_manage_ads',
-    'instagram_basic',
-    'leads_retrieval',
-    'pages_manage_metadata',
-  ]
-    .filter((scope) => !scopes.has(scope));
-  if (missingScopes.length) {
+  const missingAdScopes = REQUIRED_AD_SCOPES.filter((scope) => !scopes.has(scope));
+  if (missingAdScopes.length && !config.metaOAuth.allowLimitedAccess) {
     throw new HttpError(
       403,
       'La autorización necesita permisos publicitarios, pages_show_list, leads_retrieval y pages_manage_metadata. Actualiza Facebook Login for Business y vuelve a conectar Meta.',
@@ -393,6 +387,9 @@ async function persistMetaToken(
   accounts: MetaAdAccount[];
   encryptedToken: string;
   expiresAt: string | null;
+  limitedAccess: boolean;
+  grantedScopes: string[];
+  missingAdScopes: string[];
 }> {
   const graphUrl = `https://graph.facebook.com/${config.metaOAuth.graphApiVersion}`;
   let accessToken: string;
@@ -416,11 +413,15 @@ async function persistMetaToken(
 
   // Validate the final token (not the temporary OAuth code/token) before the
   // ad-account edge. This makes missing grants explicit for both OAuth flows.
-  await validateMetaAccessToken(accessToken, expectedMetaUserId);
+  const debug = await validateMetaAccessToken(accessToken, expectedMetaUserId);
+  const grantedScopes = debug.scopes ?? [];
+  const grantedScopeSet = new Set(grantedScopes);
+  const missingAdScopes = REQUIRED_AD_SCOPES.filter((scope) => !grantedScopeSet.has(scope));
+  const limitedAccess = missingAdScopes.length > 0;
 
   const accounts: MetaAdAccount[] = [];
   let after: string | undefined;
-  for (let page = 0; page < MAX_AD_ACCOUNT_PAGES; page += 1) {
+  for (let page = 0; !limitedAccess && page < MAX_AD_ACCOUNT_PAGES; page += 1) {
     let response: MetaAdAccountsResponse;
     try {
       const { data } = await axios.get<MetaAdAccountsResponse>(`${graphUrl}/me/adaccounts`, {
@@ -464,21 +465,12 @@ async function persistMetaToken(
   const activeAccounts = accounts.filter(
     (account) => account.account_status === 1 && account.id && account.name,
   );
-  if (!activeAccounts.length) {
+  if (!limitedAccess && !activeAccounts.length) {
     throw new HttpError(422, 'No encontramos cuentas publicitarias activas en el acceso otorgado.');
   }
 
-  let metaUserId: string;
-  try {
-    const { data } = await axios.get<MetaUserResponse>(`${graphUrl}/me`, {
-      params: { fields: 'id', access_token: accessToken },
-      timeout: 15000,
-    });
-    metaUserId = data.id;
-    if (!metaUserId) throw new Error('Missing Meta user id');
-  } catch {
-    throw new HttpError(502, 'No se pudo identificar la cuenta autorizada en Meta.');
-  }
+  const metaUserId = debug.user_id;
+  if (!metaUserId) throw new HttpError(502, 'No se pudo identificar la cuenta autorizada en Meta.');
   if (expectedMetaUserId && metaUserId !== expectedMetaUserId) {
     throw new HttpError(401, 'La autorización de Meta no coincide con la cuenta validada.');
   }
@@ -493,6 +485,9 @@ async function persistMetaToken(
     accounts: activeAccounts,
     encryptedToken: encryptMetaToken(accessToken),
     expiresAt,
+    limitedAccess,
+    grantedScopes,
+    missingAdScopes,
   };
 }
 
@@ -532,6 +527,11 @@ export async function deleteMetaUserData(signedRequest: string): Promise<string>
     .delete()
     .eq('meta_user_id', payload.user_id);
   if (error) throw new HttpError(503, 'No se pudieron eliminar los datos asociados a Meta.');
+  const { error: authorizationError } = await supabase
+    .from('meta_oauth_authorizations')
+    .delete()
+    .eq('meta_user_id', payload.user_id);
+  if (authorizationError) throw new HttpError(503, 'No se pudieron eliminar las autorizaciones limitadas de Meta.');
   return randomBytes(16).toString('hex');
 }
 
@@ -551,6 +551,21 @@ export function metaDataDeletionStatusUrl(confirmationCode: string): string {
 }
 
 export async function saveMetaConnections(input: Awaited<ReturnType<typeof exchangeMetaCode>>): Promise<void> {
+  if (input.limitedAccess) {
+    const { error } = await supabase.from('meta_oauth_authorizations').upsert({
+      empresa_id: input.empresaId,
+      meta_user_id: input.metaUserId,
+      permisos: { scopes: input.grantedScopes, missing_ad_scopes: input.missingAdScopes },
+      access_token_enc: input.encryptedToken,
+      token_expira_en: input.expiresAt,
+      actualizado_en: new Date().toISOString(),
+    }, { onConflict: 'empresa_id,meta_user_id' });
+    if (error) {
+      throw new HttpError(503, 'Meta autorizÃ³ el acceso limitado, pero no se pudo guardar la autorizaciÃ³n de prueba.');
+    }
+    return;
+  }
+
   const { data, error } = await supabase.from('conexiones').upsert(
     input.accounts.map((account) => ({
       empresa_id: input.empresaId,
@@ -560,15 +575,7 @@ export async function saveMetaConnections(input: Awaited<ReturnType<typeof excha
       meta_currency: account.currency,
       estado: 'conectada',
       permisos: {
-        scopes: [
-          'ads_management',
-          'ads_read',
-          'pages_show_list',
-          'pages_manage_ads',
-          'instagram_basic',
-          'leads_retrieval',
-          'pages_manage_metadata',
-        ],
+        scopes: input.grantedScopes,
       },
       access_token_enc: input.encryptedToken,
       token_expira_en: input.expiresAt,

@@ -86,7 +86,12 @@ async function completarOAuthMetaSdk(req: Request, res: Response): Promise<void>
 
     const result = await exchangeMetaSdkToken(accessToken, state, req.organizationId);
     await guardarConexionMeta(result);
-    res.json({ connected: true, accounts_connected: result.accounts.length });
+    res.json({
+      connected: !result.limitedAccess,
+      limited: result.limitedAccess,
+      accounts_connected: result.accounts.length,
+      missing_scopes: result.missingAdScopes,
+    });
   } catch (error) {
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
@@ -100,7 +105,9 @@ async function guardarConexionMeta(result: Awaited<ReturnType<typeof exchangeMet
     'CREATE',
     null,
     {
-      accion: 'meta_oauth_connected',
+      accion: result.limitedAccess ? 'meta_oauth_limited_authorization_saved' : 'meta_oauth_connected',
+      permisos_limitados: result.limitedAccess,
+      missing_scopes: result.missingAdScopes,
       cuentas: result.accounts.map(({ id, name }) => ({ id, name })),
     },
     { empresaId: result.empresaId },
@@ -157,7 +164,7 @@ async function callbackOAuthMeta(req: Request, res: Response): Promise<void> {
 
     const result = await exchangeMetaCode(code, state);
     await guardarConexionMeta(result);
-    redirigirMeta(res, 'connected');
+    redirigirMeta(res, result.limitedAccess ? 'connected_limited' : 'connected');
   } catch (error) {
     const status = error instanceof HttpError ? error.statusCode : 500;
     const message = error instanceof HttpError ? error.message : 'Error interno al conectar Meta.';

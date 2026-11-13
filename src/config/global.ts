@@ -22,6 +22,7 @@ export const {
   META_APP_ID = '',
   META_APP_SECRET = '',
   META_TOKEN_ENCRYPTION_KEY = '',
+  META_OAUTH_ALLOW_LIMITED_ACCESS = '',
   META_WEBHOOK_VERIFY_TOKEN = '',
   WHATSAPP_WEBHOOK_VERIFY_TOKEN = '',
   INTEGRATION_CREDENTIALS_ENCRYPTION_KEY = '',
@@ -73,6 +74,9 @@ export const config = {
     tokenEncryptionKey: META_TOKEN_ENCRYPTION_KEY.trim(),
     frontendUrl: PUBLIC_FRONTEND_URL.trim().replace(/\/$/, ''),
     graphApiVersion: META_GRAPH_API_VERSION.trim() || 'v24.0',
+    // Temporary review/testing mode: save OAuth grants without ads permissions,
+    // but do not expose them as an ad-account connection.
+    allowLimitedAccess: asBool(META_OAUTH_ALLOW_LIMITED_ACCESS, false),
     callbackUrl: PUBLIC_API_URL
       ? `${PUBLIC_API_URL.replace(/\/$/, '')}/api/v1/conexiones/meta/oauth/callback`
       : '',
