@@ -59,5 +59,19 @@ const receive: RequestHandler = (req, res) => {
 };
 
 export const whatsappWebhookRouter = Router();
+
+/** Estado no sensible para el panel de configuración del frontend. */
+whatsappWebhookRouter.get('/status', (_req, res) => {
+  const webhookConfigured = Boolean(config.whatsappWebhookVerifyToken);
+  const signatureValidation = Boolean(config.metaOAuth.appSecret);
+
+  res.json({
+    webhook_configured: webhookConfigured,
+    signature_validation: signatureValidation,
+    receives_events: webhookConfigured && signatureValidation,
+    processes_messages: false,
+  });
+});
+
 whatsappWebhookRouter.get('/', verify);
 whatsappWebhookRouter.post('/', receive);
