@@ -3,6 +3,8 @@ import { timingSafeEqual } from 'crypto';
 import { errorResponse, HttpError } from '../core/errors';
 import { verifyMetaSignature } from '../services/meta-leads.service';
 import { config } from '../config/global';
+import supabase from '../config/supabaseClient';
+import { requireOrg } from '../middlewares/sessionAuth';
 
 function sameSecret(received: string, expected: string): boolean {
   const receivedBytes = Buffer.from(received);
@@ -50,13 +52,68 @@ const receive: RequestHandler = (req, res) => {
       throw new HttpError(400, 'El webhook no contiene eventos de WhatsApp Business.');
     }
 
-    // Acknowledge valid events without logging message contents or personal data.
+    void persistIncomingMessages(payload).catch((error) => {
+      console.error('[whatsapp] no se pudieron guardar los mensajes recibidos', error);
+    });
+
     res.status(200).json({ received: true });
   } catch (error) {
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
   }
 };
+
+interface WhatsAppPayload {
+  entry?: Array<{
+    changes?: Array<{
+      value?: {
+        metadata?: { phone_number_id?: string };
+        contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>;
+        messages?: Array<{
+          id?: string;
+          from?: string;
+          timestamp?: string;
+          type?: string;
+          text?: { body?: string };
+        }>;
+      };
+    }>;
+  }>;
+}
+
+async function persistIncomingMessages(payload: unknown): Promise<void> {
+  const empresaId = Number(config.defaultOrganizationId);
+  if (!Number.isSafeInteger(empresaId) || empresaId <= 0) return;
+
+  const body = payload as WhatsAppPayload;
+  const rows = (body.entry ?? []).flatMap((entry) =>
+    (entry.changes ?? []).flatMap((change) => {
+      const value = change.value;
+      return (value?.messages ?? []).flatMap((message) => {
+        if (!message.id || !message.from) return [];
+        const contact = value?.contacts?.find((item) => item.wa_id === message.from);
+        return [{
+          empresa_id: empresaId,
+          meta_message_id: message.id,
+          phone_number_id: value?.metadata?.phone_number_id ?? null,
+          sender_phone: message.from,
+          sender_name: contact?.profile?.name ?? null,
+          message_type: message.type ?? 'unknown',
+          message_text: message.text?.body ?? null,
+          meta_timestamp: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : null,
+          payload: message,
+        }];
+      });
+    }),
+  );
+
+  if (!rows.length) return;
+  const { error } = await supabase.from('whatsapp_messages').upsert(rows, {
+    onConflict: 'empresa_id,meta_message_id',
+    ignoreDuplicates: true,
+  });
+  if (error) throw new Error(error.message);
+}
 
 export const whatsappWebhookRouter = Router();
 
@@ -69,9 +126,28 @@ whatsappWebhookRouter.get('/status', (_req, res) => {
     webhook_configured: webhookConfigured,
     signature_validation: signatureValidation,
     receives_events: webhookConfigured && signatureValidation,
+    stores_messages: Boolean(config.defaultOrganizationId),
     processes_messages: false,
   });
 });
 
 whatsappWebhookRouter.get('/', verify);
 whatsappWebhookRouter.post('/', receive);
+
+export const whatsappMessagesRouter = Router();
+whatsappMessagesRouter.get('/', ...requireOrg, async (req, res) => {
+  try {
+    const empresaId = Number(req.organizationId);
+    const { data, error } = await supabase
+      .from('whatsapp_messages')
+      .select('message_id, meta_message_id, sender_phone, sender_name, message_type, message_text, meta_timestamp, recibido_en')
+      .eq('empresa_id', empresaId)
+      .order('recibido_en', { ascending: false })
+      .limit(100);
+    if (error) throw new Error(error.message);
+    res.json(data ?? []);
+  } catch (error) {
+    const { status, body } = errorResponse(error);
+    res.status(status).json(body);
+  }
+});
