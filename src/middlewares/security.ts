@@ -59,8 +59,26 @@ export const noStore: RequestHandler = (_req, res, next) => {
  * origen no listado simplemente no recibe cabeceras CORS. Las peticiones sin
  * `Origin` (curl, servidor a servidor) no pasan por CORS.
  */
+/**
+ * En desarrollo se aceptan orígenes locales en cualquier puerto (Vite salta a
+ * 5174, 5175… si 5173 está ocupado). En producción solo vale `ALLOWED_ORIGIN`.
+ */
+const esOrigenLocalDev = (origin: string): boolean => {
+  if (config.production) return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return (
+      protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const corsPolicy = cors({
-  origin: (origin, callback) => callback(null, !origin || config.allowedOrigin.includes(origin)),
+  origin: (origin, callback) =>
+    callback(null, !origin || config.allowedOrigin.includes(origin) || esOrigenLocalDev(origin)),
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type', 'X-Empresa-Id'],

@@ -57,6 +57,8 @@ import { brandAssetRouter, brandColorRouter } from './routes/brandkit.route';
 import { lotesAlMandoRouter } from './routes/lotes-almando.route';
 import { metaWebhookRouter } from './controllers/meta-webhook.controller';
 import { whatsappMessagesRouter, whatsappWebhookRouter } from './controllers/whatsapp-webhook.controller';
+import { whatsappTestRouter } from './routes/whatsapp-test.route';
+import { threadsOAuthRouter } from './controllers/threads-oauth.controller';
 import { asegurarBucket } from './services/brandkit.storage';
 import { asegurarBucket as asegurarBucketMedia } from './services/media.storage';
 import { corsPolicy, noStore, requireHttps, securityHeaders } from './middlewares/security';
@@ -84,6 +86,10 @@ app.use('/api/webhooks/whatsapp', express.raw({ type: 'application/json', limit:
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 app.use('/api/v1/whatsapp/messages', whatsappMessagesRouter);
+// Servicio TEMPORAL de prueba: plantilla + imagen/anuncio por WhatsApp.
+app.use('/api/v1/whatsapp/test', whatsappTestRouter);
+// Threads OAuth de prueba: solicita threads_basic y verifica /me en el callback.
+app.use('/api/v1/threads/oauth', threadsOAuthRouter);
 
 // ── Salud del servicio ──────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {

@@ -168,11 +168,15 @@ export async function subirArchivo(
   }
 }
 
-/** URL firmada de corta duración para un blob privado. */
-export async function urlFirmada(ruta: string): Promise<string> {
+/** URL firmada para un blob privado (5 minutos por defecto). */
+export async function urlFirmada(
+  ruta: string,
+  segundos: number = SEGUNDOS_URL_FIRMADA
+): Promise<string> {
+  const ttl = Math.min(604800, Math.max(60, Math.floor(segundos)));
   const { data, error } = await supabase.storage
     .from(BUCKET)
-    .createSignedUrl(ruta, SEGUNDOS_URL_FIRMADA);
+    .createSignedUrl(ruta, ttl);
   if (error || !data?.signedUrl) {
     throw new HttpError(500, `No se pudo generar la URL de descarga: ${error?.message ?? ''}`);
   }

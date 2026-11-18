@@ -14,7 +14,7 @@ export {
  * /api/v1/campaigns/reports/analytics:
  *   get:
  *     summary: Consulta métricas de campañas en Meta
- *     description: Requiere sesión y permiso ver_analitica. Rango inclusivo máximo de 90 días; limit entre 1 y 100. Meta puede revisar y actualizar Insights después de la consulta, por lo que no se garantiza tiempo real. actualizado_en es la hora de consulta, no la fecha de origen de eventos.
+ *     description: Requiere sesión y permiso ver_analitica. Rango inclusivo máximo de 90 días; limit entre 1 y 100. Con fuente=meta consulta Meta Marketing API Insights; con fuente=demo devuelve métricas sintéticas deterministas (no provienen de Meta) para mostrar la interfaz sin una cuenta con entrega.
  *     tags: [Analítica]
  *     parameters:
  *       - in: query
@@ -27,7 +27,7 @@ export {
  *         schema: { type: string, format: date }
  *       - in: query
  *         name: fuente
- *         schema: { type: string, enum: [meta], default: meta }
+ *         schema: { type: string, enum: [meta, demo], default: meta }
  *       - in: query
  *         name: campania_id
  *         schema: { type: integer }

@@ -17,6 +17,7 @@ export const openapiTags = [
   { name: 'Leads', description: 'Contactos captados por campañas, formularios o registro manual (RF-10)' },
   { name: 'Auditoría', description: 'Bitácora de solo lectura: quién hizo qué, sobre qué tabla y dentro de qué empresa (RF-09)' },
   { name: 'Brand Kit', description: 'Archivos de marca y colores de la paleta: versiones en bucket privado y descargas con URL firmada' },
+  { name: 'WhatsApp', description: 'Servicio TEMPORAL de prueba: plantilla, texto, imagen y anuncio con OpenRouter' },
 ];
 
 export const securitySchemes = {

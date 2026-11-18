@@ -67,6 +67,32 @@ interface MetaGraphErrorResponse {
 
 const REQUIRED_AD_SCOPES = ['ads_read', 'ads_management'] as const;
 
+/**
+ * Permisos que Meta considera superconjunto de otros. `ads_management` permite
+ * leer y escribir anuncios, así que un token con ese permiso y sin `ads_read`
+ * (habitual en cuentas sandbox) puede leer igualmente cuentas e insights.
+ * Sin esta equivalencia se rechazaban tokens perfectamente válidos.
+ */
+const IMPLIED_SCOPES: Record<string, readonly string[]> = {
+  ads_management: ['ads_read'],
+};
+
+/** Añade los permisos implícitos a los concedidos por Meta. */
+function normalizeGrantedScopes(scopes: readonly string[]): Set<string> {
+  const set = new Set(scopes);
+  for (const [scope, implied] of Object.entries(IMPLIED_SCOPES)) {
+    if (!set.has(scope)) continue;
+    for (const alternative of implied) set.add(alternative);
+  }
+  return set;
+}
+
+/** Permisos publicitarios que faltan de verdad (respetando los implícitos). */
+export function missingAdScopes(scopes: readonly string[]): string[] {
+  const granted = normalizeGrantedScopes(scopes);
+  return REQUIRED_AD_SCOPES.filter((scope) => !granted.has(scope));
+}
+
 function metaErrorDetails(error: unknown, endpoint: string): Record<string, unknown> {
   if (!axios.isAxiosError<MetaGraphErrorResponse>(error)) return { endpoint };
   const meta = error.response?.data?.error;
@@ -117,8 +143,7 @@ async function validateMetaAccessToken(
     });
   }
 
-  const grantedScopes = new Set(debug.scopes ?? []);
-  const missingScopes = REQUIRED_AD_SCOPES.filter((scope) => !grantedScopes.has(scope));
+  const missingScopes = missingAdScopes(debug.scopes ?? []);
   if (missingScopes.length && !config.metaOAuth.allowLimitedAccess) {
     throw new HttpError(
       403,
@@ -290,9 +315,8 @@ export async function exchangeMetaSdkToken(
   if (!debug?.is_valid || debug.app_id !== config.metaOAuth.appId || !debug.user_id) {
     throw new HttpError(401, 'Meta devolvió una autorización inválida para esta aplicación.');
   }
-  const scopes = new Set(debug.scopes ?? []);
-  const missingAdScopes = REQUIRED_AD_SCOPES.filter((scope) => !scopes.has(scope));
-  if (missingAdScopes.length && !config.metaOAuth.allowLimitedAccess) {
+  const missingAdScopeList = missingAdScopes(debug.scopes ?? []);
+  if (missingAdScopeList.length && !config.metaOAuth.allowLimitedAccess) {
     throw new HttpError(
       403,
       'La autorización necesita permisos publicitarios, pages_show_list, leads_retrieval y pages_manage_metadata. Actualiza Facebook Login for Business y vuelve a conectar Meta.',
@@ -313,7 +337,11 @@ export async function listMetaPages(accessToken: string): Promise<MetaPage[]> {
       },
       timeout: 15000,
     });
-    return (data.data ?? []).filter((page) => page.id && page.name);
+    // Sin `pages_show_list` Meta devuelve el id pero no el nombre. Se conserva la
+    // página para poder usarla en pruebas (el nombre solo es etiqueta de UI).
+    return (data.data ?? [])
+      .filter((page) => Boolean(page.id))
+      .map((page) => ({ ...page, name: page.name?.trim() || `Página ${page.id}` }));
   } catch {
     throw new HttpError(
       502,
@@ -415,9 +443,8 @@ async function persistMetaToken(
   // ad-account edge. This makes missing grants explicit for both OAuth flows.
   const debug = await validateMetaAccessToken(accessToken, expectedMetaUserId);
   const grantedScopes = debug.scopes ?? [];
-  const grantedScopeSet = new Set(grantedScopes);
-  const missingAdScopes = REQUIRED_AD_SCOPES.filter((scope) => !grantedScopeSet.has(scope));
-  const limitedAccess = missingAdScopes.length > 0;
+  const missingAdScopeList = missingAdScopes(grantedScopes);
+  const limitedAccess = missingAdScopeList.length > 0;
 
   const accounts: MetaAdAccount[] = [];
   let after: string | undefined;
@@ -487,7 +514,7 @@ async function persistMetaToken(
     expiresAt,
     limitedAccess,
     grantedScopes,
-    missingAdScopes,
+    missingAdScopes: missingAdScopeList,
   };
 }
 

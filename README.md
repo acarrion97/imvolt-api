@@ -555,6 +555,44 @@ Manager. Antes de desplegar la API, ejecuta
 `database/migrations/2026-11-05_06_meta_lead_ads.sql` y
 `database/migrations/2026-11-06_03_advertising_approval_idempotency.sql`.
 
+### Servicio de prueba de WhatsApp + anuncios con OpenRouter
+
+Hay un flujo **temporal** para probar de extremo a extremo:
+
+1. OpenRouter genera la imagen del anuncio (o un PNG de marca local si no hay
+   saldo y `OPENROUTER_IMAGE_FALLBACK=true`).
+2. Se envía una plantilla aprobada (`jaspers_market_plain_text_v1` por defecto)
+   si el body lo pide.
+3. Se sube la imagen a WhatsApp y se envía con el copy del anuncio como caption.
+
+Endpoints (sesión + rol propietario/administrador/marketing):
+
+- `GET /api/v1/whatsapp/test/status`
+- `POST /api/v1/whatsapp/test/template`
+- `POST /api/v1/whatsapp/test/text`
+- `POST /api/v1/whatsapp/test/image`
+- `POST /api/v1/whatsapp/test/anuncio`
+
+Prueba rápida sin levantar el frontend:
+
+```bash
+cd api
+npm run whatsapp:test
+npm run whatsapp:test -- --template   # primero envía la plantilla
+```
+
+Variables: `WHATSAPP_ID_TEST`, `WHATSAPP_TOKEN_TEST`, `WHATSAPP_PHONE_TEST`,
+`WHATSAPP_TEST_ENABLED=true`, `WHATSAPP_GRAPH_VERSION=v25.0`,
+`OPENROUTER_IMAGE_MODEL`, `OPENROUTER_IMAGE_FALLBACK`.
+
+**OpenRouter exige al menos USD 1.00 de saldo** para devolver imágenes. Con la
+clave actual (`0` créditos) el API responde 402 y usa el PNG de marca local para
+que WhatsApp se pueda probar igual. Para imágenes reales, carga saldo en
+<https://openrouter.ai/settings/credits>.
+
+Guía completa de credenciales, curl y límites de Meta:
+[`docs/WHATSAPP_TEST.md`](docs/WHATSAPP_TEST.md).
+
 ### Configurar Higgsfield
 
 Las credenciales se administran por empresa desde Administración → Empresas →

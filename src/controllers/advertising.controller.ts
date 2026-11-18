@@ -25,7 +25,7 @@ import { metaService, MetaCredentials } from '../services/meta.service';
 import { strategistService } from '../services/strategist.service';
 import type { PropiedadEstrategica } from '../services/strategist.service';
 import { generarEstrategiaConOpenRouter, GENERATOR_VERSION } from '../services/openrouter.service';
-import { obtenerMetricasMeta } from '../services/analytics.service';
+import { obtenerMetricasDemo, obtenerMetricasMeta } from '../services/analytics.service';
 import {
   campaignRequest,
   campaniaPublicitariaRequest,
@@ -703,12 +703,12 @@ async function consultarAnaliticaCampanas(req: Request, res: Response): Promise<
     const days = (toDate.getTime() - fromDate.getTime()) / 86400000;
     if (!datePattern.test(desde) || !datePattern.test(hasta) || Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) ||
       fromDate.toISOString().slice(0, 10) !== desde || toDate.toISOString().slice(0, 10) !== hasta ||
-      days < 0 || days > 90 || fuente !== 'meta' || !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+      days < 0 || days > 90 || (fuente !== 'meta' && fuente !== 'demo') || !Number.isInteger(limit) || limit < 1 || limit > 100 ||
       !Number.isInteger(offset) || offset < 0 || (campaignId && !/^[1-9]\d*$/.test(campaignId))) {
-      throw new ValidationError('Parámetros inválidos. Usa desde/hasta YYYY-MM-DD (máximo 90 días), fuente=meta, campania_id opcional, limit 1-100 y offset >= 0.');
+      throw new ValidationError('Parámetros inválidos. Usa desde/hasta YYYY-MM-DD (máximo 90 días), fuente=meta o fuente=demo, campania_id opcional, limit 1-100 y offset >= 0.');
     }
     let query = supabase.from('campanias_publicitarias')
-      .select('campania_publicitaria_id, nombre, meta_campaign_id, conexion_id', { count: 'exact' })
+      .select('campania_publicitaria_id, nombre, meta_campaign_id, conexion_id, presupuesto_diario', { count: 'exact' })
       .eq('empresa_id', Number(req.organizationId))
       .order('campania_publicitaria_id', { ascending: true })
       .range(offset, offset + limit - 1);
@@ -716,6 +716,13 @@ async function consultarAnaliticaCampanas(req: Request, res: Response): Promise<
     const { data, error, count } = await query;
     if (error) throw new Error(error.message);
     const metricas = await Promise.all((data ?? []).map(async (row) => {
+      if (fuente === 'demo') {
+        return obtenerMetricasDemo({
+          campaign_id: String(row.campania_publicitaria_id),
+          campaign_name: row.nombre == null ? null : String(row.nombre),
+          presupuesto_diario: row.presupuesto_diario == null ? null : Number(row.presupuesto_diario),
+        }, desde, hasta);
+      }
       const credentials = row.meta_campaign_id
         ? await credencialesMeta(req.organizationId as string, row.conexion_id == null ? null : Number(row.conexion_id))
         : null;
@@ -729,7 +736,13 @@ async function consultarAnaliticaCampanas(req: Request, res: Response): Promise<
       items: metricas,
       pagination: { limit, offset, total: count ?? 0, has_more: offset + metricas.length < (count ?? 0) },
       formulas: { ctr: 'clics / impresiones * 100; null cuando impresiones es 0 o falta algún dato', cpl: 'gasto / leads; null cuando leads es 0 o falta algún dato' },
-      datos: { fuente: 'Meta Marketing API Insights', actualizado_en: new Date().toISOString(), antiguedad: 'Meta puede revisar y actualizar las métricas; la API no garantiza tiempo real. El campo actualizado_en indica cuándo se consultó, no cuándo Meta originó cada evento.' },
+      datos: fuente === 'demo'
+        ? {
+          fuente: 'Datos de demostración generados localmente',
+          actualizado_en: new Date().toISOString(),
+          antiguedad: 'Valores sintéticos y deterministas para mostrar la interfaz. No provienen de Meta: las cuentas sandbox no entregan anuncios y su Insights API devuelve siempre 0 filas. Usa fuente=meta para datos reales.',
+        }
+        : { fuente: 'Meta Marketing API Insights', actualizado_en: new Date().toISOString(), antiguedad: 'Meta puede revisar y actualizar las métricas; la API no garantiza tiempo real. El campo actualizado_en indica cuándo se consultó, no cuándo Meta originó cada evento.' },
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'CAMPAIGN_ANALYTICS_PROVIDER_ERROR') {

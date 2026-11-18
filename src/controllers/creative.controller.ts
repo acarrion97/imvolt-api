@@ -37,6 +37,8 @@ import {
 } from '../models/creative/generacion.model';
 import { getCompanyIntegrationConfig } from '../services/integration-config.service';
 import { HiggsfieldCredentials, higgsfieldService } from '../services/higgsfield.service';
+import { generarImagenConOpenRouter } from '../services/openrouter-image.service';
+import { subirArchivo, urlFirmada } from '../services/media.storage';
 import { exigirLimiteDePlan } from '../services/plan-limits.service';
 
 // Catálogos GLOBALES (tipos, plantillas, formatos, enfoques): sin columna de
@@ -127,6 +129,7 @@ const generationService = new BaseService<Generacion>('generaciones', 'generacio
 async function persistGenerationOutputs(
   generation: Generacion,
   urls: string[],
+  metadata: Record<string, unknown> = {},
 ): Promise<void> {
   const uniqueUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
   if (uniqueUrls.length === 0) return;
@@ -144,6 +147,7 @@ async function persistGenerationOutputs(
     output_index: outputIndex,
     media_type: model.tipo_media,
     output_url: outputUrl,
+    metadata,
   }));
   const { error } = await supabase
     .from('generation_outputs')
@@ -165,7 +169,21 @@ const generationOutputsGet: RequestHandler = async (req, res) => {
       .eq('generation_id', generation.generacion_id)
       .order('output_index', { ascending: true });
     if (error) throw new Error(error.message);
-    res.json(generationOutputResource.formatMany(data ?? []));
+
+    // Los outputs guardados en el bucket privado se firman de nuevo al leerlos:
+    // la URL persistida puede haber expirado.
+    const rows = await Promise.all(
+      (data ?? []).map(async (row) => {
+        const storagePath = (row.metadata as { storage_path?: unknown } | null)?.storage_path;
+        if (typeof storagePath !== 'string' || !storagePath) return row;
+        try {
+          return { ...row, output_url: await urlFirmada(storagePath, 3600) };
+        } catch {
+          return row;
+        }
+      }),
+    );
+    res.json(generationOutputResource.formatMany(rows));
   } catch (error) {
     const { status, body } = errorResponse(error);
     res.status(status).json(body);
@@ -354,6 +372,48 @@ const generationCreate: RequestHandler = async (req, res) => {
       estado: 'quoted',
       precio_usd: priceUsd,
     }, auditContext(req));
+
+    // ── OpenRouter (modo temporal) ──────────────────────────────────────────
+    // Si el modelo del catálogo pertenece a OpenRouter, la imagen se genera de
+    // forma síncrona y se guarda en el bucket privado. No pasa por Higgsfield.
+    if (String(model.proveedor).toLowerCase() === 'openrouter') {
+      if (model.tipo_media !== 'image') {
+        throw new ValidationError('OpenRouter temporal solo admite generación de imágenes.');
+      }
+      const result = await generarImagenConOpenRouter({
+        prompt: payload.prompt,
+        aspectRatio: typeof params.ratio === 'string' ? params.ratio : undefined,
+      });
+      const extension = result.mime === 'image/jpeg' ? 'jpg' : 'png';
+      const storagePath =
+        `empresa_${req.organizationId}/openrouter/` +
+        `${generation.generacion_id}-${Date.now()}.${extension}`;
+      await subirArchivo(storagePath, result.image, result.mime);
+      const outputUrl = await urlFirmada(storagePath, 3600);
+      await persistGenerationOutputs(generation, [outputUrl], {
+        storage_bucket: 'media-assets',
+        storage_path: storagePath,
+        provider: 'openrouter',
+        model: result.model,
+        simulated: result.simulated,
+      });
+      const updated = await generationService.update<Generacion>(generation.generacion_id, {
+        estado: 'completed',
+        peticion_proveedor_id: `or_${generation.generacion_id}_${Date.now()}`,
+        error_mensaje: null,
+        parametros: {
+          ...params,
+          result_url: outputUrl,
+          storage_path: storagePath,
+          provider: 'openrouter',
+          model: result.model,
+          simulated: result.simulated,
+          ...(result.warning ? { warning: result.warning } : {}),
+        },
+      }, auditContext(req));
+      res.status(201).json(generacionResource.format(updated));
+      return;
+    }
 
     const credentials = await higgsfieldCredentials(req.organizationId);
     const job = await higgsfieldService.createJob({

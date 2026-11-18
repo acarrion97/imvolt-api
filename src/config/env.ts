@@ -131,6 +131,26 @@ export function validateEnv(env: Env): EnvReport {
     errors.push('META_GRAPH_API_VERSION debe tener el formato vNN.N (por ejemplo, v24.0).');
   }
 
+  const threadsAppId = get('THREADS_APP_ID');
+  const threadsAppSecret = get('THREADS_APP_SECRET');
+  const threadsRedirectUri = get('THREADS_REDIRECT_URI');
+  if (threadsAppId || threadsAppSecret) {
+    if (!threadsAppId) errors.push('THREADS_APP_ID es obligatoria para habilitar OAuth de Threads.');
+    if (!threadsAppSecret) errors.push('THREADS_APP_SECRET es obligatoria para habilitar OAuth de Threads.');
+    if (!threadsRedirectUri) errors.push('THREADS_REDIRECT_URI es obligatoria para habilitar OAuth de Threads.');
+  }
+  if (threadsRedirectUri) {
+    const threadsRedirect = parseUrl(threadsRedirectUri);
+    if (!threadsRedirect || threadsRedirect.href !== threadsRedirectUri) {
+      errors.push('THREADS_REDIRECT_URI debe ser una URL absoluta válida, sin fragmento.');
+    } else if (
+      threadsRedirect.protocol !== 'https:' ||
+      ['localhost', '127.0.0.1', '::1'].includes(threadsRedirect.hostname)
+    ) {
+      errors.push('THREADS_REDIRECT_URI debe usar HTTPS y un dominio público (Threads no acepta localhost).');
+    }
+  }
+
   const integrationCredentialsKey = get('INTEGRATION_CREDENTIALS_ENCRYPTION_KEY');
   if (integrationCredentialsKey && !/^[\da-fA-F]{64}$/.test(integrationCredentialsKey)) {
     errors.push('INTEGRATION_CREDENTIALS_ENCRYPTION_KEY debe ser una clave hexadecimal de 64 caracteres (32 bytes).');
@@ -147,6 +167,38 @@ export function validateEnv(env: Env): EnvReport {
   }
   if (whatsappWebhookToken && !metaAppSecret) {
     errors.push('META_APP_SECRET es obligatoria para validar la firma del webhook de WhatsApp.');
+  }
+
+  // ── WhatsApp Cloud API: número de prueba ──────────────────────────────────
+  const whatsappGraphVersion = get('WHATSAPP_GRAPH_VERSION');
+  if (whatsappGraphVersion && !/^v\d+\.\d+$/.test(whatsappGraphVersion)) {
+    errors.push('WHATSAPP_GRAPH_VERSION debe tener el formato vNN.N (por ejemplo, v25.0).');
+  }
+  const whatsappTestEnabled = get('WHATSAPP_TEST_ENABLED').toLowerCase() === 'true';
+  if (whatsappTestEnabled) {
+    if (!get('WHATSAPP_ID_TEST')) {
+      warnings.push('WHATSAPP_TEST_ENABLED=true pero WHATSAPP_ID_TEST está vacía: los envíos de prueba fallarán.');
+    }
+    if (!get('WHATSAPP_TOKEN_TEST')) {
+      warnings.push('WHATSAPP_TEST_ENABLED=true pero WHATSAPP_TOKEN_TEST está vacía: los envíos de prueba fallarán.');
+    }
+    if (!get('WHATSAPP_PHONE_TEST')) {
+      warnings.push('WHATSAPP_PHONE_TEST está vacía: cada envío de prueba deberá indicar el destinatario en el body.');
+    }
+  }
+
+  // ── OpenRouter: imágenes temporales ───────────────────────────────────────
+  const openRouterImageTimeout = get('OPENROUTER_IMAGE_TIMEOUT_MS');
+  if (
+    openRouterImageTimeout &&
+    !(Number.isInteger(Number(openRouterImageTimeout)) && Number(openRouterImageTimeout) > 0)
+  ) {
+    errors.push('OPENROUTER_IMAGE_TIMEOUT_MS debe ser un entero positivo (milisegundos).');
+  }
+  if (!get('OPENROUTER_API_KEY') && get('OPENROUTER_IMAGE_SIMULATE').toLowerCase() !== 'true') {
+    warnings.push(
+      'OPENROUTER_API_KEY no está definida: la generación de imágenes usará el PNG de marca local (fallback).',
+    );
   }
 
   return { errors, warnings };

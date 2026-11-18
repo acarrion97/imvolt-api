@@ -21,6 +21,9 @@ export const {
   AUTH_RATE_LIMIT_WINDOW_MINUTES = '',
   META_APP_ID = '',
   META_APP_SECRET = '',
+  THREADS_APP_ID = '',
+  THREADS_APP_SECRET = '',
+  THREADS_REDIRECT_URI = '',
   META_TOKEN_ENCRYPTION_KEY = '',
   META_OAUTH_ALLOW_LIMITED_ACCESS = '',
   META_WEBHOOK_VERIFY_TOKEN = '',
@@ -29,6 +32,19 @@ export const {
   PUBLIC_FRONTEND_URL = '',
   META_GRAPH_API_VERSION = '',
   LOTES_ALMANDO_API_URL = '',
+  // WhatsApp Cloud API — número de prueba (solo backend; nunca al navegador).
+  WHATSAPP_ID_TEST = '',
+  WHATSAPP_TOKEN_TEST = '',
+  WHATSAPP_PHONE_TEST = '',
+  WHATSAPP_GRAPH_VERSION = '',
+  WHATSAPP_TEST_ENABLED = '',
+  WHATSAPP_TEST_TEMPLATE_NAME = '',
+  WHATSAPP_TEST_TEMPLATE_LANGUAGE = '',
+  // OpenRouter — generación temporal de imágenes.
+  OPENROUTER_IMAGE_MODEL = '',
+  OPENROUTER_IMAGE_SIMULATE = '',
+  OPENROUTER_IMAGE_FALLBACK = '',
+  OPENROUTER_IMAGE_TIMEOUT_MS = '',
 } = process.env;
 
 const asBool = (value: string, fallback: boolean): boolean =>
@@ -81,8 +97,37 @@ export const config = {
       ? `${PUBLIC_API_URL.replace(/\/$/, '')}/api/v1/conexiones/meta/oauth/callback`
       : '',
   },
+  threadsOAuth: {
+    appId: THREADS_APP_ID.trim(),
+    appSecret: THREADS_APP_SECRET.trim(),
+    redirectUri: THREADS_REDIRECT_URI.trim(),
+    authorizationUrl: 'https://www.threads.com/oauth/authorize',
+    graphApiUrl: 'https://graph.threads.com/v1.0',
+  },
   metaWebhookVerifyToken: META_WEBHOOK_VERIFY_TOKEN.trim(),
   whatsappWebhookVerifyToken: WHATSAPP_WEBHOOK_VERIFY_TOKEN.trim(),
+  /**
+   * Número de prueba de WhatsApp Cloud API. Se usa SOLO desde el backend para
+   * los endpoints /api/v1/whatsapp/test. En producción, cambiar a credenciales
+   * productivas y desactivar WHATSAPP_TEST_ENABLED.
+   */
+  whatsappTest: {
+    enabled: asBool(WHATSAPP_TEST_ENABLED, false),
+    phoneNumberId: WHATSAPP_ID_TEST.trim(),
+    token: WHATSAPP_TOKEN_TEST.trim(),
+    recipient: WHATSAPP_PHONE_TEST.trim(),
+    graphVersion: WHATSAPP_GRAPH_VERSION.trim() || 'v25.0',
+    template: WHATSAPP_TEST_TEMPLATE_NAME.trim() || 'jaspers_market_plain_text_v1',
+    language: WHATSAPP_TEST_TEMPLATE_LANGUAGE.trim() || 'en_US',
+  },
+  /** OpenRouter para generar imágenes mientras se prueba el flujo de anuncios. */
+  openRouterImage: {
+    apiKey: (process.env.OPENROUTER_API_KEY ?? '').trim(),
+    model: OPENROUTER_IMAGE_MODEL.trim() || 'google/gemini-3.1-flash-lite-image',
+    simulate: asBool(OPENROUTER_IMAGE_SIMULATE, false),
+    fallback: asBool(OPENROUTER_IMAGE_FALLBACK, true),
+    timeoutMs: Math.min(120000, Math.max(5000, asPositiveInt(OPENROUTER_IMAGE_TIMEOUT_MS, 60000))),
+  },
   integrationCredentialsEncryptionKey: INTEGRATION_CREDENTIALS_ENCRYPTION_KEY.trim(),
   db: {
     url: SUPABASE_URL,
