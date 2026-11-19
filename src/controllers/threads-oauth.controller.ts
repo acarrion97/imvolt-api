@@ -131,6 +131,17 @@ const callbackThreadsOAuth: RequestHandler = async (req, res) => {
 
   const providerError = typeof req.query.error === 'string' ? req.query.error : '';
   if (providerError) {
+    const frontendUrl = config.metaOAuth.frontendUrl;
+    if (frontendUrl) {
+      try {
+        const target = new URL('/configuracion', frontendUrl);
+        target.searchParams.set('threads', 'cancelled');
+        res.redirect(302, target.toString());
+        return;
+      } catch {
+        // Fallback al HTML
+      }
+    }
     res.status(400).type('html').send(htmlPage(
       'Autorización cancelada',
       '<p>No se concedió el acceso a Threads. Puedes cerrar esta pestaña.</p>',
@@ -174,12 +185,37 @@ const callbackThreadsOAuth: RequestHandler = async (req, res) => {
     const profile = profileResponse.data;
     if (!profile.id || !profile.username) throw new Error('Threads no devolvió el perfil básico.');
 
+    const frontendUrl = config.metaOAuth.frontendUrl;
+    if (frontendUrl) {
+      try {
+        const target = new URL('/configuracion', frontendUrl);
+        target.searchParams.set('threads', 'connected');
+        target.searchParams.set('threads_username', profile.username);
+        target.searchParams.set('threads_id', profile.id);
+        res.redirect(302, target.toString());
+        return;
+      } catch {
+        // Fallback al HTML
+      }
+    }
+
     res.status(200).type('html').send(htmlPage(
       'Prueba de Threads completada',
       `<p>IMVOLT autorizó y consultó el perfil de Threads con <code>threads_basic</code>.</p><p>Cuenta: <strong>@${htmlEscape(profile.username)}</strong></p><p>ID de perfil: <code>${htmlEscape(profile.id)}</code></p><p>El token se usó en el servidor para esta comprobación y no se guardó ni se mostró.</p>`,
     ));
   } catch {
     console.error('[threads][oauth] no se pudo completar la prueba threads_basic');
+    const frontendUrl = config.metaOAuth.frontendUrl;
+    if (frontendUrl) {
+      try {
+        const target = new URL('/configuracion', frontendUrl);
+        target.searchParams.set('threads', 'error');
+        res.redirect(302, target.toString());
+        return;
+      } catch {
+        // Fallback al HTML
+      }
+    }
     res.status(502).type('html').send(htmlPage(
       'No se pudo verificar el perfil de Threads',
       '<p>Meta no completó el intercambio del código o la consulta del perfil. Revisa las credenciales Threads de la API, el permiso autorizado y que la URL de redirección coincida exactamente.</p>',
